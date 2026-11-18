@@ -3,6 +3,7 @@
 
 use bluebl::app::App;
 use bluebl::config::Config;
+use bluebl::identity::Identity;
 use bluebl::mesh::offline;
 use bluebl::ui;
 use ratatui::backend::TestBackend;
@@ -15,7 +16,7 @@ fn app() -> (App, Sender<bluebl::mesh::MeshEvent>) {
         nick: "akaomi".into(),
         ..Config::default()
     };
-    (App::new(cfg, rx), tx)
+    (App::new(cfg, rx, Identity::generate()), tx)
 }
 
 /// Renderiza y devuelve el buffer como texto plano.

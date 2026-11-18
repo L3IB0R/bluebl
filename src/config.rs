@@ -62,6 +62,12 @@ impl Config {
         self.path.clone().unwrap_or_else(Self::default_path)
     }
 
+    /// Ruta del archivo de identidad: hermano del config, en el mismo
+    /// directorio (`~/.config/bluebl/identity`).
+    pub fn identity_path(&self) -> PathBuf {
+        self.effective_path().with_file_name("identity")
+    }
+
     /// Carga la configuración; si no existe, devuelve los valores por
     /// defecto sin romper nada.
     pub fn load() -> Config {

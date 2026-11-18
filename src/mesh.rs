@@ -16,7 +16,10 @@ pub enum MeshEvent {
         id: String,
     },
     Message {
+        /// ID completo del remitente (16 hex); la TUI lo resuelve a apodo.
         from: String,
+        /// Apodo que el remitente declara en su payload, si lo trae.
+        nick: Option<String>,
         channel: Option<String>,
         text: String,
     },

@@ -44,6 +44,40 @@ impl Identity {
         (self.noise_secret.to_bytes(), self.signing_secret.to_bytes())
     }
 
+    /// Carga la identidad desde `path`; si no existe o está corrupta, la
+    /// genera y la guarda (64 bytes, permisos 0600). El peer ID debe ser
+    /// estable entre arranques: los pares del mesh te reconocen por él.
+    pub fn load_or_generate(path: &std::path::Path) -> Identity {
+        if let Ok(bytes) = std::fs::read(path) {
+            if bytes.len() == 64 {
+                let mut noise = [0u8; 32];
+                let mut signing = [0u8; 32];
+                noise.copy_from_slice(&bytes[..32]);
+                signing.copy_from_slice(&bytes[32..]);
+                return Self::from_bytes(noise, signing);
+            }
+        }
+        let id = Self::generate();
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let (noise, signing) = id.to_bytes();
+        let mut buf = [0u8; 64];
+        buf[..32].copy_from_slice(&noise);
+        buf[32..].copy_from_slice(&signing);
+        // Escritura atómica: nunca queda un archivo a medias.
+        let tmp = path.with_extension("tmp");
+        if std::fs::write(&tmp, buf).is_ok() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+            }
+            let _ = std::fs::rename(&tmp, path);
+        }
+        id
+    }
+
     pub fn noise_public(&self) -> [u8; 32] {
         PublicKey::from(&self.noise_secret).to_bytes()
     }
@@ -180,5 +214,17 @@ mod tests {
         let restored = Identity::from_bytes(ns, ss);
         assert_eq!(id.peer_id(), restored.peer_id());
         assert_eq!(id.signing_public(), restored.signing_public());
+    }
+
+    #[test]
+    fn identidad_se_persiste_y_recupera() {
+        let path = std::env::temp_dir().join(format!("bluebl-id-{}", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let a = Identity::load_or_generate(&path);
+        let b = Identity::load_or_generate(&path);
+        // La segunda lectura debe devolver el mismo peer ID: sin persistencia
+        // los pares del mesh verían una identidad nueva en cada arranque.
+        assert_eq!(a.peer_id(), b.peer_id());
+        let _ = std::fs::remove_file(&path);
     }
 }

@@ -106,7 +106,9 @@ fn main() -> std::io::Result<()> {
     // Canal de eventos: el backend BLE (u otro) le cuenta a la TUI lo que
     // pasa en la malla.
     let (events_tx, rx) = mesh::offline();
-    let mut app = App::new(cfg, rx);
+    // Identidad persistente: el peer ID no debe cambiar entre arranques.
+    let identity = bluebl::identity::Identity::load_or_generate(&cfg.identity_path());
+    let mut app = App::new(cfg, rx, identity);
 
     // Fase 1: radio BLE real en Linux. En el resto de plataformas el
     // backend abre un canal sin radio (Fase 2).

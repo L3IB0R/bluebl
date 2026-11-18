@@ -213,7 +213,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(config: Config, rx: Receiver<MeshEvent>) -> App {
+    pub fn new(config: Config, rx: Receiver<MeshEvent>, identity: Identity) -> App {
         let themes = themes::all_themes();
         let theme_idx = themes
             .iter()
@@ -232,7 +232,7 @@ impl App {
         );
         App {
             running: true,
-            identity: Identity::generate(),
+            identity,
             nickname: config.nick.clone(),
             config,
             themes,
@@ -345,14 +345,34 @@ impl App {
                 }
                 MeshEvent::Message {
                     from,
+                    nick,
                     channel,
                     text,
                 } => {
-                    let ch = channel.unwrap_or_else(|| self.channel().to_string());
+                    // Nuestro propio eco (malla con saltos): ya está en el chat.
+                    if from == self.peer_id_hex() {
+                        continue;
+                    }
+                    // Apodo: announce validado > declaración del payload > id.
+                    let sender = self
+                        .peers
+                        .iter()
+                        .find(|p| p.id == from)
+                        .map(|p| p.nickname.clone())
+                        .or(nick.filter(|n| !n.is_empty()))
+                        .unwrap_or_else(|| from.chars().take(8).collect());
+
+                    // El broadcast de texto plano es de #general, no del
+                    // canal en el que estés mirando.
+                    let ch = channel.unwrap_or_else(|| "#general".to_string());
+                    if !self.channels.contains(&ch) {
+                        self.channels.push(ch.clone());
+                        self.system(format!("nuevo canal: {ch}"));
+                    }
                     self.messages.entry(ch.clone()).or_default().push(ChatLine {
                         time: now_hm(),
                         kind: LineKind::Peer,
-                        sender: from,
+                        sender,
                         text,
                     });
                     if ch != self.channel() {
@@ -692,7 +712,7 @@ mod tests {
             path: Some(std::env::temp_dir().join("bluebl-test-config")),
             ..Config::default()
         };
-        (App::new(cfg, rx), tx)
+        (App::new(cfg, rx, Identity::generate()), tx)
     }
 
     #[test]
@@ -782,6 +802,7 @@ mod tests {
         .unwrap();
         tx.send(MeshEvent::Message {
             from: "luna".into(),
+            nick: None,
             channel: None,
             text: "¿alguien ahí?".into(),
         })
@@ -791,6 +812,81 @@ mod tests {
         let last = app.lines().last().unwrap();
         assert_eq!(last.kind, LineKind::Peer);
         assert_eq!(last.text, "¿alguien ahí?");
+    }
+
+    #[test]
+    fn mensaje_resuelve_apodo_del_announce() {
+        let (mut app, tx) = test_app();
+        tx.send(MeshEvent::PeerJoined {
+            id: "aabbccdd00112233".into(),
+            nickname: "luna".into(),
+        })
+        .unwrap();
+        // El announce está validado por clave pública: manda sobre lo que
+        // el payload declare.
+        tx.send(MeshEvent::Message {
+            from: "aabbccdd00112233".into(),
+            nick: Some("otro_apodo".into()),
+            channel: None,
+            text: "hola".into(),
+        })
+        .unwrap();
+        app.drain_mesh();
+        assert_eq!(app.lines().last().unwrap().sender, "luna");
+    }
+
+    #[test]
+    fn broadcast_publico_va_a_general() {
+        let (mut app, tx) = test_app();
+        for c in "/join #neon".chars() {
+            app.input.insert(c);
+        }
+        app.send();
+        assert_eq!(app.channel(), "#neon");
+
+        tx.send(MeshEvent::Message {
+            from: "1122334455667788".into(),
+            nick: Some("luna".into()),
+            channel: None,
+            text: "para todos".into(),
+        })
+        .unwrap();
+        app.drain_mesh();
+
+        let gen = app.messages.get("#general").expect("broadcast en #general");
+        assert_eq!(gen.last().unwrap().text, "para todos");
+        // No secuestra el canal que estás mirando.
+        assert_eq!(app.channel(), "#neon");
+    }
+
+    #[test]
+    fn canal_entrante_se_abre_solo() {
+        let (mut app, tx) = test_app();
+        tx.send(MeshEvent::Message {
+            from: "1122334455667788".into(),
+            nick: Some("luna".into()),
+            channel: Some("#soporte".into()),
+            text: "¿hay alguien?".into(),
+        })
+        .unwrap();
+        app.drain_mesh();
+        assert!(app.channels.iter().any(|c| c == "#soporte"));
+        assert!(app.messages.contains_key("#soporte"));
+    }
+
+    #[test]
+    fn eco_propio_no_se_duplica() {
+        let (mut app, tx) = test_app();
+        let mine = app.peer_id_hex();
+        tx.send(MeshEvent::Message {
+            from: mine,
+            nick: Some(app.nickname.clone()),
+            channel: None,
+            text: "hola".into(),
+        })
+        .unwrap();
+        app.drain_mesh();
+        assert!(app.lines().iter().all(|l| l.text != "hola"));
     }
 
     #[test]

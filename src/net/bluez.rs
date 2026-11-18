@@ -237,11 +237,14 @@ fn bridge_commands(cmd_rx: Receiver<NetCommand>) -> tokio_mpsc::Receiver<NetComm
 struct PeerLink {
     peripheral: Peripheral,
     characteristic: Characteristic,
+    /// Peer ID del vecino (16 hex) tomado del service data del anuncio;
+    /// permite avisar a la TUI con el mismo id que usa el announce.
+    peer_hex: Option<String>,
 }
 
 async fn run(
     identity: Identity,
-    nickname: String,
+    mut nickname: String,
     events: &Sender<MeshEvent>,
     cmd_rx: Receiver<NetCommand>,
 ) -> Result<(), String> {
@@ -351,7 +354,12 @@ async fn run(
                         }
                     }
                     CentralEvent::DeviceDisconnected(id) => {
-                        links.remove(&id);
+                        // Avisamos a la TUI para que el par no quede eterno.
+                        if let Some(link) = links.remove(&id) {
+                            if let Some(hex_id) = link.peer_hex {
+                                let _ = events.send(MeshEvent::PeerLeft { id: hex_id });
+                            }
+                        }
                     }
                     _ => {}
                 }
@@ -380,6 +388,9 @@ async fn run(
                         broadcast(&links, &bytes, &char, &conn, None).await;
                     }
                     NetCommand::SetNickname(new) => {
+                        // El anuncio y el announce periódico usan este nick:
+                        // sin actualizarlo, a los 30 s volvería el antiguo.
+                        nickname = new.clone();
                         let _ = unregister_advertisement(&conn, &adapter_path).await;
                         let _ = conn.object_server().at(
                             ADV_PATH,
@@ -487,6 +498,7 @@ async fn try_link(
         PeerLink {
             peripheral,
             characteristic,
+            peer_hex,
         },
     );
     let _ = events.send(MeshEvent::Status(format!("vecino conectado: {label}")));
@@ -640,16 +652,24 @@ async fn handle_packet(
         }
         msg_type::MESSAGE => {
             // Texto plano (broadcast público) o payload binario con canal.
-            let (text, channel) = match ChatMessage::decode(&packet.payload) {
-                Ok(m) if !m.content.is_empty() && !m.sender.is_empty() => (m.content, m.channel),
-                _ => (String::from_utf8_lossy(&packet.payload).to_string(), None),
+            let (text, channel, claimed) = match ChatMessage::decode(&packet.payload) {
+                Ok(m) if !m.content.is_empty() && !m.sender.is_empty() => {
+                    (m.content, m.channel, Some(m.sender))
+                }
+                _ => (
+                    String::from_utf8_lossy(&packet.payload).to_string(),
+                    None,
+                    None,
+                ),
             };
             if text.is_empty() {
                 return;
             }
-            let from_nick = hex::encode(&packet.sender[..4]);
+            // El id completo (8 bytes en hex) deja a la TUI resolver el apodo.
+            let from = hex::encode(packet.sender);
             let _ = events.send(MeshEvent::Message {
-                from: from_nick,
+                from,
+                nick: claimed,
                 channel,
                 text,
             });
