@@ -22,7 +22,7 @@ Dentro del programa:
   intro enviar · tab cambiar panel · ↑↓ / avpag rePag desplazar
   ctrl+T selector de temas · f1 ayuda · ctrl+Q salir
 
-Comandos: /help · /nick · /join · /msg · /who · /pair · /fp · /accept · /theme
+Comandos: /help · /nick · /who · /pair · /fp · /accept · /theme
 
 Configuración: ~/.config/bluebl/config";
 

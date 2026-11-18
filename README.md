@@ -28,9 +28,13 @@ y los mensajes saltan de nodo en nodo hasta llegar.
   compresión raw-deflate, TLV de anuncio y fragmentación de paquetes grandes
   con el mismo formato por el aire que la app de referencia (hay tests que
   comparan byte a byte con vectores fijos).
+- **Un solo canal: `#general`.** El chat público viaja como texto UTF-8
+  plano, igual que lo hace la app: lo que escribes en BlueBl se ve en su
+  pantalla y lo que escribe ella se ve aquí, sin ruido ni mensajes
+  cruzados de canales ajenos.
 - **42 temas** en cuatro categorías (base y accesibilidad, terminales,
   juegos, cine), con selector en caliente (Ctrl+T) y persistencia.
-- **Panel adaptable.** Pantalla ancha con canales y pares a la izquierda;
+- **Panel adaptable.** Pantalla ancha con la lista de pares a la izquierda;
   en pantallas estrechas (Termux, Windows) un solo panel que cambias con Tab.
   Tres densidades de texto: `compacto`, `comodo`, `grande`.
 - **Detección de dependencias** estilo terminal: `--deps` comprueba radio,
@@ -83,12 +87,12 @@ Dentro del programa:
 Comandos de chat:
 
 ```
-/nick NOMBRE    cambiar apodo          /who           quién está en el canal
-/join #canal    abrir o entrar a un    /msg NICK …    mensaje privado
-/part           salir del canal        /me ACCIÓN     acción en tercera persona
-/theme NOMBRE   cambiar tema           /density N     compacto | comodo | grande
-/peers          vecinos conectados     /deps          radio del sistema
-/clear          vaciar el canal        /help          esta ayuda
+/nick NOMBRE     cambiar apodo          /who            quién está en la malla
+/me ACCIÓN       acción en tercera      /peers          lista de pares
+/theme NOMBRE    cambiar tema           /density N      compacto | comodo | grande
+/pair            QR + huella            /fp [apodo]     huella para comparar
+/accept APODO    contacto verificado    /deps           radio del sistema
+/clear           vaciar el chat         /help           esta ayuda
 ```
 
 ## Configuración
@@ -106,7 +110,7 @@ density=comodo
 | Fase | Contenido | Estado |
 |---|---|---|
 | 0 | Protocolo, identidad, temas, TUI, CLI | ✅ |
-| 1 | Radio BLE en Linux (BlueZ) | 🚧 |
+| 1 | Radio BLE en Linux (BlueZ) | ✅ |
 | 2 | Termux y Windows | ⏳ |
 | 3 | Couriers, outbox, gossip, favoritos, panic wipe | ⏳ |
 

@@ -7,15 +7,6 @@ pub enum Command {
     Quit,
     /// `/nick NUEVO`
     Nick(String),
-    /// `/join #canal`
-    Join(String),
-    /// `/part` — salir del canal actual.
-    Part,
-    /// `/msg apodo texto…` — mensaje privado.
-    Msg {
-        to: String,
-        text: String,
-    },
     /// `/me acción` — acción en tercera persona.
     Me(String),
     /// `/who` — lista de pares.
@@ -24,7 +15,7 @@ pub enum Command {
     Theme(Option<String>),
     /// `/density compacto|comodo|grande`
     Density(String),
-    /// `/clear` — vaciar el canal actual.
+    /// `/clear` — vaciar el chat.
     Clear,
     /// `/peers` — ver la lista de pares en el chat.
     Peers,
@@ -55,15 +46,6 @@ pub fn parse(input: &str) -> Option<Command> {
         "help" | "?" => Command::Help,
         "quit" | "exit" | "q" => Command::Quit,
         "nick" => Command::Nick(args.to_string()),
-        "join" | "j" => Command::Join(args.to_string()),
-        "part" | "leave" => Command::Part,
-        "msg" | "m" => {
-            let (to, text) = args.split_once(' ')?;
-            Command::Msg {
-                to: to.to_string(),
-                text: text.trim().to_string(),
-            }
-        }
         "me" => Command::Me(args.to_string()),
         "who" | "w" => Command::Who,
         "theme" | "t" => Command::Theme(if args.is_empty() {
@@ -98,14 +80,11 @@ pub fn help_text() -> Vec<String> {
     vec![
         "Comandos:".into(),
         "  /nick NOMBRE      cambiar apodo".into(),
-        "  /join #CANAL      entrar en un canal".into(),
-        "  /part             salir del canal actual".into(),
-        "  /msg NICK TEXTO   mensaje privado".into(),
         "  /me ACCION        acción en tercera persona".into(),
         "  /who · /peers     lista de pares en la malla".into(),
         "  /theme [ID]       cambiar tema (sin ID: lista)".into(),
         "  /density NOMBRE   compacto · comodo · grande".into(),
-        "  /clear            vaciar el canal actual".into(),
+        "  /clear            vaciar el chat".into(),
         "  /deps             comprobar la radio BLE del sistema".into(),
         "  /pair             QR de emparejamiento (bitchat://verify) + huella".into(),
         "  /fp [apodo]       huella digital para comparar con el teléfono".into(),
@@ -142,14 +121,6 @@ mod tests {
     #[test]
     fn comandos_con_argumentos() {
         assert_eq!(parse("/nick luna"), Some(Command::Nick("luna".into())));
-        assert_eq!(parse("/join #neon"), Some(Command::Join("#neon".into())));
-        assert_eq!(
-            parse("/msg kai ¿ahí?"),
-            Some(Command::Msg {
-                to: "kai".into(),
-                text: "¿ahí?".into()
-            })
-        );
         assert_eq!(
             parse("/density grande"),
             Some(Command::Density("grande".into()))
@@ -162,8 +133,15 @@ mod tests {
     }
 
     #[test]
-    fn msg_sin_texto_no_es_comando_valido() {
-        assert_eq!(parse("/msg luna"), None);
+    fn join_part_y_msg_ya_no_existen() {
+        // Sin canales ni MDs: lo que fue /join, /part y /msg es un
+        // comando desconocido, no un mensaje ni un canal.
+        assert_eq!(parse("/join #neon"), Some(Command::Unknown("join".into())));
+        assert_eq!(parse("/part"), Some(Command::Unknown("part".into())));
+        assert_eq!(
+            parse("/msg luna hola"),
+            Some(Command::Unknown("msg".into()))
+        );
     }
 
     #[test]

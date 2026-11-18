@@ -388,18 +388,6 @@ async fn run(
                     NetCommand::SendPacket(bytes) => {
                         broadcast(&links, &bytes, &char, &conn, None).await;
                     }
-                    NetCommand::SendDm { peer_id, bytes } => {
-                        // Un MD sólo toca el enlace del destinatario: ni el
-                        // resto de pares ni los suscritos a nuestro servicio.
-                        for link in links.values() {
-                            if link.peer_hex.as_deref() == Some(peer_id.as_str()) {
-                                let _ = link
-                                    .peripheral
-                                    .write(&link.characteristic, &bytes, WriteType::WithoutResponse)
-                                    .await;
-                            }
-                        }
-                    }
                     NetCommand::SetNickname(new) => {
                         // El anuncio y el announce periódico usan este nick:
                         // sin actualizarlo, a los 30 s volvería el antiguo.
@@ -638,7 +626,7 @@ async fn handle_packet(
     }
 
     // Un packet con destinatario que no somos nosotros: ni se entrega ni
-    // se retransmite (así viajan los MDs).
+    // se retransmite (el tráfico dirigido no es asunto nuestro).
     if let Some(r) = packet.recipient {
         if r != BROADCAST && r != *my_peer {
             return;
@@ -701,6 +689,16 @@ async fn handle_packet(
             if text.is_empty() {
                 return;
             }
+            // Sólo #general: un mensaje de otro canal (o un MD) no se
+            // muestra nunca — no se cuela en el general de nadie.
+            if channel.as_deref().is_some_and(|c| c != crate::app::GENERAL) {
+                wire_log(&format!(
+                    "canal {:?} de {} descartado (sólo general)",
+                    channel,
+                    hex::encode(packet.sender)
+                ));
+                return;
+            }
             wire_log(&format!(
                 "MESSAGE de {} canal={:?} texto={:?}",
                 hex::encode(packet.sender),
@@ -724,8 +722,8 @@ async fn handle_packet(
         }
     }
 
-    // Retransmisión (flood) mientras quede TTL. Los MDs van directos al
-    // destinatario: reenviarlos a la malla sería ruido (y una fuga).
+    // Retransmisión (flood) mientras quede TTL. Lo que va dirigido a un
+    // destinatario concreto no se reenvía a la malla.
     if packet.ttl > 1 && packet.recipient.is_none_or(|r| r == BROADCAST) {
         packet.ttl -= 1;
         if let Ok(relayed) = packet.encode(true) {

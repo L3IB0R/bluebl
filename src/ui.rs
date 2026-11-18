@@ -85,14 +85,10 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     );
 }
 
-/// Pantalla ancha: canales + pares a la izquierda, chat a la derecha.
+/// Pantalla ancha: pares a la izquierda, chat a la derecha.
 fn draw_wide(f: &mut Frame, app: &App, area: Rect) {
     let cols = Layout::horizontal([Constraint::Length(26), Constraint::Min(40)]).split(area);
-
-    let side =
-        Layout::vertical([Constraint::Percentage(45), Constraint::Percentage(55)]).split(cols[0]);
-    draw_channels(f, app, side[0]);
-    draw_peers(f, app, side[1]);
+    draw_peers(f, app, cols[0]);
     draw_chat(f, app, cols[1], true);
 }
 
@@ -100,7 +96,6 @@ fn draw_wide(f: &mut Frame, app: &App, area: Rect) {
 fn draw_narrow(f: &mut Frame, app: &App, area: Rect) {
     match app.panel {
         Panel::Chat => draw_chat(f, app, area, false),
-        Panel::Canales => draw_channels(f, app, area),
         Panel::Pares => draw_peers(f, app, area),
     }
 }
@@ -114,37 +109,6 @@ fn panel_block<'a>(title: &'a str, app: &App, bordered: bool) -> Block<'a> {
         b = b.borders(Borders::ALL).border_style(style(pal.border));
     }
     b
-}
-
-fn draw_channels(f: &mut Frame, app: &App, area: Rect) {
-    let pal = &app.theme().palette;
-    let bordered = area.width >= 40;
-    let lines: Vec<Line> = app
-        .channels
-        .iter()
-        .enumerate()
-        .map(|(i, ch)| {
-            let selected = i == app.channel_idx;
-            let (symbol, st) = if selected {
-                (
-                    "▸ ",
-                    Style::default()
-                        .fg(pal.bg)
-                        .bg(pal.accent)
-                        .add_modifier(Modifier::BOLD),
-                )
-            } else {
-                ("  ", Style::default().fg(pal.fg))
-            };
-            Line::from(vec![Span::styled(format!("{symbol}{ch}"), st)])
-        })
-        .collect();
-    f.render_widget(
-        Paragraph::new(lines)
-            .block(panel_block("Canales", app, bordered))
-            .style(Style::default().fg(pal.fg).bg(pal.bg)),
-        area,
-    );
 }
 
 fn draw_peers(f: &mut Frame, app: &App, area: Rect) {
@@ -192,13 +156,7 @@ fn draw_peers(f: &mut Frame, app: &App, area: Rect) {
 
 fn draw_chat(f: &mut Frame, app: &App, area: Rect, bordered: bool) {
     let pal = &app.theme().palette;
-    // Los MDs llevan su distintivo: nada que confundir con #general.
-    let title = if app.channel().starts_with('@') {
-        format!("✉ {}", app.channel())
-    } else {
-        app.channel().to_string()
-    };
-    let block = panel_block(&title, app, bordered);
+    let block = panel_block(app.channel(), app, bordered);
     let inner = if bordered { block.inner(area) } else { area };
     f.render_widget(block.style(Style::default().fg(pal.fg).bg(pal.bg)), area);
 
@@ -236,14 +194,6 @@ fn draw_chat(f: &mut Frame, app: &App, area: Rect, bordered: bool) {
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(msg.text.clone(), Style::default().fg(pal.peer_msg)),
-            ])),
-            LineKind::Direct => lines.push(Line::from(vec![
-                ts,
-                Span::styled(
-                    format!("✉ {}: ", msg.sender),
-                    Style::default().fg(pal.accent).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(msg.text.clone(), Style::default().fg(pal.fg)),
             ])),
             LineKind::System => lines.push(Line::from(vec![
                 Span::styled(" ", Style::default().fg(pal.bg)),

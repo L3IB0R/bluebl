@@ -24,6 +24,8 @@ pub enum MeshEvent {
         from: String,
         /// Apodo que el remitente declara en su payload, si lo trae.
         nick: Option<String>,
+        /// Canal declarado en el payload (binario). La interfaz sólo
+        /// acepta `None` (texto plano) o `#general`: el resto se descarta.
         channel: Option<String>,
         text: String,
     },

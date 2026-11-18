@@ -1,5 +1,5 @@
 //! Humo de interfaz: la TUI se dibuja en tres tamaños de pantalla y lo
-//! esencial aparece (cabecera, canales, chat, entrada y barra de estado).
+//! esencial aparece (cabecera, pares, chat, entrada y barra de estado).
 
 use bluebl::app::App;
 use bluebl::config::Config;
@@ -40,7 +40,6 @@ fn pantalla_ancha_muestra_los_dos_paneles() {
     let screen = render(&mut app, 120, 30);
     assert!(screen.contains("BlueBl"), "falta la cabecera:\n{screen}");
     assert!(screen.contains("#general"), "falta el canal");
-    assert!(screen.contains("Canales"), "falta el panel de canales");
     assert!(screen.contains("Pares"), "falta el panel de pares");
     assert!(screen.contains("bienvenida"), "falta el mensaje del chat");
     assert!(screen.contains("mensaje"), "falta el cuadro de entrada");
@@ -91,7 +90,7 @@ fn la_ayuda_se_pinta() {
     let (mut app, _tx) = app();
     app.overlay = Some(bluebl::app::Overlay::Help);
     let screen = render(&mut app, 100, 30);
-    assert!(screen.contains("/join"), "faltan los comandos:\n{screen}");
+    assert!(screen.contains("/pair"), "faltan los comandos:\n{screen}");
     assert!(screen.contains("/density"));
 }
 
