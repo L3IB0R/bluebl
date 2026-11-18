@@ -7,6 +7,7 @@ pub mod deps;
 pub mod identity;
 pub mod mesh;
 pub mod net;
+pub mod pairing;
 pub mod proto;
 pub mod themes;
 pub mod ui;

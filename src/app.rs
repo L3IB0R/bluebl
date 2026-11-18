@@ -142,6 +142,10 @@ pub struct Peer {
     pub nickname: String,
     /// Contacto verificado por emparejamiento (★): no es un random.
     pub verified: bool,
+    /// Claves públicas del announce (hex): con ellas se calcula la huella
+    /// para compararla con la del teléfono y se guarda el contacto.
+    pub noise_public: String,
+    pub signing_public: String,
 }
 
 /// Caja de texto con cursor por caracteres (UTF-8 seguro).
@@ -390,15 +394,42 @@ impl App {
         }
     }
 
-    /// Código de emparejamiento de este nodo (id + claves + apodo).
-    fn pair_code(&self) -> String {
-        format!(
-            "BB1|{}|{}|{}|{}",
-            hex::encode(self.identity.peer_id()),
-            hex::encode(self.identity.noise_public()),
-            hex::encode(self.identity.signing_public()),
-            self.nickname.replace('|', "_"),
-        )
+    /// Muestra una huella digital para comparar con la del teléfono
+    /// (la app la muestra bajo el icono de candado del contacto).
+    /// Sin apodo: la nuestra; con apodo: la de ese par de la malla.
+    fn print_fingerprint(&mut self, nick: Option<&str>) {
+        match nick {
+            None => {
+                let fp = crate::pairing::fingerprint(&self.identity.noise_public());
+                self.system("tu huella (compárala con la del teléfono):");
+                for line in crate::pairing::format_fingerprint(&fp).lines() {
+                    self.system(format!("  {line}"));
+                }
+            }
+            Some(name) => {
+                let Some(p) = self
+                    .peers
+                    .iter()
+                    .find(|p| p.nickname.eq_ignore_ascii_case(name))
+                    .cloned()
+                else {
+                    self.error(format!("no veo a «{name}» en la malla — prueba /who"));
+                    return;
+                };
+                let Some(fp) = crate::pairing::fingerprint_from_hex(&p.noise_public) else {
+                    self.error("la clave pública de ese par es ilegible");
+                    return;
+                };
+                self.system(format!("huella de {} ({}):", p.nickname, &p.id[..8]));
+                for line in crate::pairing::format_fingerprint(&fp).lines() {
+                    self.system(format!("  {line}"));
+                }
+                self.system(format!(
+                    "si coincide con la del teléfono: /accept {}",
+                    p.nickname
+                ));
+            }
+        }
     }
 
     /// Procesa los eventos que llegan del backend de malla.
@@ -423,6 +454,8 @@ impl App {
                                 id: id.clone(),
                                 nickname: nickname.clone(),
                                 verified,
+                                noise_public: noise_public.clone(),
+                                signing_public: signing_public.clone(),
                             });
                             if verified {
                                 self.system(format!("★ {nickname} — contacto verificado"));
@@ -435,13 +468,16 @@ impl App {
                             }
                         }
                         Some(pos) => {
-                            // Anuncio repetido: se actualiza el apodo y el
-                            // estado de contacto sin spamear el chat.
+                            // Anuncio repetido: se actualiza el apodo, las
+                            // claves y el estado de contacto sin spamear el
+                            // chat.
                             let p = &mut self.peers[pos];
                             if p.nickname != nickname {
                                 p.nickname = nickname;
                             }
                             p.verified = verified;
+                            p.noise_public = noise_public;
+                            p.signing_public = signing_public;
                         }
                     }
                 }
@@ -476,11 +512,12 @@ impl App {
                         Some(c) if c.starts_with('@') => format!("@{sender}"),
                         other => other.clone().unwrap_or_else(|| "#general".to_string()),
                     };
-                    if !self.channels.contains(&ch) {
+                    let is_dm = ch.starts_with('@');
+                    let was_new = !self.channels.contains(&ch);
+                    if was_new {
                         self.channels.push(ch.clone());
-                        self.system(format!("nuevo canal: {ch}"));
                     }
-                    let kind = if ch.starts_with('@') {
+                    let kind = if is_dm {
                         LineKind::Direct
                     } else {
                         LineKind::Peer
@@ -488,13 +525,27 @@ impl App {
                     self.messages.entry(ch.clone()).or_default().push(ChatLine {
                         time: now_hm(),
                         kind,
-                        sender,
+                        sender: sender.clone(),
                         text,
                     });
-                    if ch != self.channel() {
-                        self.system(format!("mensaje nuevo en {ch}"));
+                    if is_dm {
+                        // Un MD manda la vista a su canal: se abre solo y se
+                        // ve al momento, como si fuera el general.
+                        if let Some(idx) = self.channels.iter().position(|c| *c == ch) {
+                            self.channel_idx = idx;
+                        }
+                        self.panel = Panel::Chat;
+                        self.scroll = 0;
+                        self.system(format!("✉ md de {sender}"));
+                    } else {
+                        if was_new {
+                            self.system(format!("nuevo canal: {ch}"));
+                        }
+                        if ch != self.channel() {
+                            self.system(format!("mensaje nuevo en {ch}"));
+                        }
+                        self.scroll = 0;
                     }
-                    self.scroll = 0;
                 }
                 MeshEvent::Status(s) => self.status = s,
             }
@@ -876,22 +927,53 @@ impl App {
                 }
             }
             Command::Pair => {
-                let code = self.pair_code();
-                let qr = qr_lines(&code);
+                let ts = now_unix();
+                let mut nonce = [0u8; 16];
+                rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut nonce);
+                let url =
+                    crate::pairing::build_verify_url(&self.identity, &self.nickname, ts, &nonce);
+                let qr = qr_lines(&url);
                 if qr.is_empty() {
-                    self.error("no se pudo dibujar el QR — usa el código de abajo");
+                    self.error("no se pudo dibujar el QR — copia la URL de abajo");
                 } else {
-                    self.system("emparejamiento listo: escanea el QR (o copia el código)");
+                    self.system("QR listo: escanéalo con la app (dura 5 min)");
                 }
-                self.system(format!("tu código: {code}"));
-                self.overlay = Some(Overlay::Pair { code, qr });
+                self.print_fingerprint(None);
+                self.system(format!("tu QR: {url}"));
+                self.overlay = Some(Overlay::Pair { code: url, qr });
             }
             Command::Accept(raw) => {
-                if raw.trim().is_empty() {
-                    self.error("uso: /accept BB1|… (el código completo)");
+                let raw = raw.trim();
+                if raw.is_empty() {
+                    self.error("uso: /accept APODO · /accept BB1|… · /accept bitchat://verify?…");
                     return;
                 }
-                match parse_pair_code(&raw) {
+                // Tres formas de dar de alta: apodo de un par en la malla
+                // (huella ya comparada a ojo), código BB1 o QR de la app.
+                let parsed: Result<Contact, String> = if raw.starts_with("bitchat://") {
+                    crate::pairing::parse_verify_url(raw, now_unix()).map(|s| Contact {
+                        id: s.id,
+                        nickname: s.nickname,
+                        noise_public: s.noise_public,
+                        signing_public: s.signing_public,
+                    })
+                } else if raw.starts_with("BB1|") {
+                    parse_pair_code(raw)
+                } else {
+                    self.peers
+                        .iter()
+                        .find(|p| p.nickname.eq_ignore_ascii_case(raw))
+                        .map(|p| Contact {
+                            id: p.id.clone(),
+                            nickname: p.nickname.clone(),
+                            noise_public: p.noise_public.clone(),
+                            signing_public: p.signing_public.clone(),
+                        })
+                        .ok_or_else(|| {
+                            format!("no veo a «{raw}» en la malla — prueba /fp {raw} o /who")
+                        })
+                };
+                match parsed {
                     Ok(c) => {
                         let id = c.id.clone();
                         let msg = if self.contacts.contains_key(&id) {
@@ -906,8 +988,11 @@ impl App {
                         }
                         self.system(msg);
                     }
-                    Err(e) => self.error(format!("código rechazado: {e}")),
+                    Err(e) => self.error(format!("contacto rechazado: {e}")),
                 }
+            }
+            Command::Fp(nick) => {
+                self.print_fingerprint(nick.as_deref());
             }
             Command::Unknown(name) => {
                 self.error(format!("comando desconocido: /{name} — prueba /help"));
@@ -925,6 +1010,15 @@ pub fn now_hm() -> String {
         .unwrap_or(0);
     // UTC fiable en cualquier plataforma; el ajuste lo pone el terminal.
     format!("{:02}:{:02}", (secs / 3600) % 24, (secs / 60) % 60)
+}
+
+/// Segundos Unix (para la frescura del QR de emparejamiento).
+fn now_unix() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 /// Peer ID en hex de 16 caracteres → 8 bytes. Formato inválido: None.
@@ -1010,9 +1104,12 @@ fn parse_pair_code(raw: &str) -> Result<Contact, String> {
     })
 }
 
-/// Dibuja un QR como bloques Unicode para el overlay.
-fn qr_lines(code: &str) -> Vec<String> {
-    let Ok(qr) = qrcode::QrCode::new(code.as_bytes()) else {
+/// Dibuja un QR como bloques Unicode para el overlay. Corrección de
+/// error baja (L): la URL de la app es larga y menos redundancia = menos
+/// módulos = cabe en la terminal.
+fn qr_lines(data: &str) -> Vec<String> {
+    let Ok(qr) = qrcode::QrCode::with_error_correction_level(data.as_bytes(), qrcode::EcLevel::L)
+    else {
         return Vec::new();
     };
     qr.render::<qrcode::render::unicode::Dense1x2>()
@@ -1289,8 +1386,12 @@ mod tests {
 
         assert!(app.channels.iter().any(|c| c == "@luna"));
         let dm = app.messages.get("@luna").expect("canal del MD");
-        assert_eq!(dm.last().unwrap().kind, LineKind::Direct);
-        assert_eq!(dm.last().unwrap().sender, "luna");
+        let direct = dm
+            .iter()
+            .find(|l| l.kind == LineKind::Direct)
+            .expect("línea Direct");
+        assert_eq!(direct.sender, "luna");
+        assert_eq!(direct.text, "para tus ojos solos");
         // No se cuela en el general.
         assert!(app
             .messages
@@ -1336,16 +1437,118 @@ mod tests {
     }
 
     #[test]
-    fn pair_genera_codigo_y_qr() {
+    fn pair_genera_qr_de_bitchat() {
         let (mut app, _tx) = test_app();
         app.run_command(Command::Pair);
         let Some(Overlay::Pair { code, qr }) = &app.overlay else {
             panic!("debería abrirse el overlay de emparejamiento");
         };
-        assert!(code.starts_with("BB1|"));
+        assert!(code.starts_with("bitchat://verify?"));
         assert!(!qr.is_empty(), "el QR debe dibujarse");
-        // El código propio apunta a nuestra identidad.
-        assert!(code.contains(&app.peer_id_hex()));
+        // El QR es el nuestro y la app podría leerlo: firma válida, id
+        // derivado de la clave y frescura en ventana.
+        let sc = crate::pairing::parse_verify_url(code, now_unix()).expect("QR propio legible");
+        assert_eq!(sc.id, app.peer_id_hex());
+        // Y la huella impresa es la de nuestra clave pública Noise.
+        let fp = crate::pairing::fingerprint(&app.identity.noise_public());
+        assert!(crate::pairing::format_fingerprint(&fp)
+            .lines()
+            .all(|l| app.lines().iter().any(|line| line.text.contains(l))));
+    }
+
+    #[test]
+    fn md_entrante_salta_a_su_canal() {
+        let (mut app, tx) = test_app();
+        // Estamos en #general leyendo, no en el MD.
+        assert_eq!(app.channel(), "#general");
+        tx.send(MeshEvent::PeerJoined {
+            id: "aabbccdd00112233".into(),
+            nickname: "luna".into(),
+            noise_public: String::new(),
+            signing_public: String::new(),
+        })
+        .unwrap();
+        tx.send(MeshEvent::Message {
+            from: "aabbccdd00112233".into(),
+            nick: Some("luna".into()),
+            channel: Some("@dm".into()),
+            text: "¿sigues ahí?".into(),
+        })
+        .unwrap();
+        app.drain_mesh();
+        // La vista cambia sola al canal del MD y el foco va al chat.
+        assert_eq!(app.channel(), "@luna");
+        assert_eq!(app.panel, Panel::Chat);
+        let dm = app.messages.get("@luna").unwrap();
+        let direct = dm
+            .iter()
+            .find(|l| l.kind == LineKind::Direct)
+            .expect("línea Direct");
+        assert_eq!(direct.text, "¿sigues ahí?");
+        // El aviso de llegada queda en el propio canal del MD.
+        assert!(dm.iter().any(|l| l.text == "✉ md de luna"));
+    }
+
+    #[test]
+    fn accept_por_apodo_de_un_par_en_la_malla() {
+        let (mut app, tx) = test_app();
+        let other = Identity::generate();
+        tx.send(MeshEvent::PeerJoined {
+            id: hex::encode(other.peer_id()),
+            nickname: "luna".into(),
+            noise_public: hex::encode(other.noise_public()),
+            signing_public: hex::encode(other.signing_public()),
+        })
+        .unwrap();
+        app.drain_mesh();
+
+        app.run_command(Command::Accept("luna".into()));
+        assert_eq!(app.contacts.len(), 1);
+        let c = app.contacts.values().next().unwrap();
+        assert_eq!(c.noise_public, hex::encode(other.noise_public()));
+        assert!(app.peers[0].verified);
+
+        // Apodo desconocido: no inventa contactos.
+        app.run_command(Command::Accept("nadie".into()));
+        assert_eq!(app.contacts.len(), 1);
+        let _ = std::fs::remove_file(app.config.identity_path().with_file_name("contacts"));
+    }
+
+    #[test]
+    fn fp_de_un_par_es_su_announce() {
+        let (mut app, tx) = test_app();
+        let other = Identity::generate();
+        tx.send(MeshEvent::PeerJoined {
+            id: hex::encode(other.peer_id()),
+            nickname: "luna".into(),
+            noise_public: hex::encode(other.noise_public()),
+            signing_public: hex::encode(other.signing_public()),
+        })
+        .unwrap();
+        app.drain_mesh();
+
+        app.run_command(Command::Fp(Some("luna".into())));
+        let expected =
+            crate::pairing::format_fingerprint(&crate::pairing::fingerprint(&other.noise_public()));
+        let head = format!("huella de luna ({}):", &hex::encode(other.peer_id())[..8]);
+        assert!(app.lines().iter().any(|l| l.text == head));
+        for line in expected.lines() {
+            let shown = format!("  {line}");
+            assert!(
+                app.lines().iter().any(|l| l.text == shown),
+                "falta la línea {shown:?}"
+            );
+        }
+
+        // La nuestra también se muestra sin argumentos.
+        app.run_command(Command::Fp(None));
+        let mine = crate::pairing::format_fingerprint(&crate::pairing::fingerprint(
+            &app.identity.noise_public(),
+        ));
+        for line in mine.lines() {
+            let shown = format!("  {line}");
+            assert!(app.lines().iter().any(|l| l.text == shown));
+        }
     }
 
     #[test]

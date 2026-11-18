@@ -192,7 +192,13 @@ fn draw_peers(f: &mut Frame, app: &App, area: Rect) {
 
 fn draw_chat(f: &mut Frame, app: &App, area: Rect, bordered: bool) {
     let pal = &app.theme().palette;
-    let block = panel_block(app.channel(), app, bordered);
+    // Los MDs llevan su distintivo: nada que confundir con #general.
+    let title = if app.channel().starts_with('@') {
+        format!("✉ {}", app.channel())
+    } else {
+        app.channel().to_string()
+    };
+    let block = panel_block(&title, app, bordered);
     let inner = if bordered { block.inner(area) } else { area };
     f.render_widget(block.style(Style::default().fg(pal.fg).bg(pal.bg)), area);
 
@@ -355,6 +361,7 @@ fn draw_overlay(f: &mut Frame, app: &App, area: Rect) {
     let h = match &app.overlay {
         Some(Overlay::Help) => (commands::help_text().len() as u16 + 4).min(area.height),
         Some(Overlay::Themes { .. }) => (area.height * 8 / 10).max(10),
+        Some(Overlay::Pair { qr, .. }) if qr.is_empty() => 8,
         Some(Overlay::Pair { qr, .. }) => (qr.len() as u16 + 4).min(area.height),
         None => return,
     };
@@ -378,20 +385,42 @@ fn draw_overlay(f: &mut Frame, app: &App, area: Rect) {
             f.render_widget(block.title(" ayuda "), rect);
             f.render_widget(Paragraph::new(lines), inner);
         }
-        Some(Overlay::Pair { qr, .. }) => {
+        Some(Overlay::Pair { code, qr }) => {
             let inner = block.inner(rect);
             f.render_widget(block.title(" emparejamiento · esc cierra "), rect);
-            // Blanco y negro puro: es lo que mejor lee una cámara.
-            let lines: Vec<Line> = qr
-                .iter()
-                .map(|l| {
-                    Line::from(Span::styled(
-                        l.clone(),
-                        Style::default().fg(Color::Black).bg(Color::White),
-                    ))
-                })
-                .collect();
-            f.render_widget(Paragraph::new(lines), inner);
+            let qr_w = qr.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+            let fits = !qr.is_empty()
+                && (qr.len() as u16) + 2 <= inner.height
+                && qr_w as u16 + 2 <= inner.width;
+            if fits {
+                // Blanco y negro puro: es lo que mejor lee una cámara.
+                let lines: Vec<Line> = qr
+                    .iter()
+                    .map(|l| {
+                        Line::from(Span::styled(
+                            l.clone(),
+                            Style::default().fg(Color::Black).bg(Color::White),
+                        ))
+                    })
+                    .collect();
+                f.render_widget(Paragraph::new(lines), inner);
+            } else {
+                // Terminal pequeña para el QR: la URL en texto, que al
+                // teléfono también se la puede dictar o pegar.
+                let mut lines = vec![Line::from(Span::styled(
+                    " QR no cabe aquí — copia esta URL: ",
+                    style(pal.error),
+                ))];
+                let width = (inner.width as usize).max(10);
+                let mut rest = code.as_str();
+                while !rest.is_empty() {
+                    let take = rest.len().min(width);
+                    let (head, tail) = rest.split_at(take);
+                    lines.push(Line::from(Span::styled(head, style(pal.fg))));
+                    rest = tail;
+                }
+                f.render_widget(Paragraph::new(lines), inner);
+            }
         }
         Some(Overlay::Themes { selected }) => {
             let inner = block.inner(rect);

@@ -30,10 +30,12 @@ pub enum Command {
     Peers,
     /// `/deps` — comprobar dependencias del sistema (radio BLE).
     Deps,
-    /// `/pair` — generar el código/QR de emparejamiento.
+    /// `/pair` — generar el QR de emparejamiento y la huella.
     Pair,
-    /// `/accept CÓDIGO` — verificar un código y añadir contacto (★).
+    /// `/accept NICK|CÓDIGO|QR` — añadir contacto verificado (★).
     Accept(String),
+    /// `/fp [apodo]` — huella digital (para comparar con el teléfono).
+    Fp(Option<String>),
     /// Comando no reconocido (se reporta, no se envía como mensaje).
     Unknown(String),
 }
@@ -75,6 +77,11 @@ pub fn parse(input: &str) -> Option<Command> {
         "deps" | "doctor" => Command::Deps,
         "pair" | "qr" => Command::Pair,
         "accept" | "add" => Command::Accept(args.to_string()),
+        "fp" | "huella" | "fingerprint" => Command::Fp(if args.is_empty() {
+            None
+        } else {
+            Some(args.to_string())
+        }),
         // Comando desconocido: se reporta, no se envía como mensaje.
         other => Command::Unknown(other.to_string()),
     })
@@ -100,8 +107,9 @@ pub fn help_text() -> Vec<String> {
         "  /density NOMBRE   compacto · comodo · grande".into(),
         "  /clear            vaciar el canal actual".into(),
         "  /deps             comprobar la radio BLE del sistema".into(),
-        "  /pair             generar código/QR de emparejamiento".into(),
-        "  /accept CÓDIGO    verificar código y añadir contacto (★)".into(),
+        "  /pair             QR de emparejamiento (bitchat://verify) + huella".into(),
+        "  /fp [apodo]       huella digital para comparar con el teléfono".into(),
+        "  /accept APODO     añadir contacto tras comparar huellas (★)".into(),
         "  /help             esta ayuda".into(),
         "  /quit             salir".into(),
         String::new(),
