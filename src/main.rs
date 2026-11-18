@@ -20,7 +20,9 @@ Opciones:
 
 Dentro del programa:
   intro enviar · tab cambiar panel · ↑↓ / avpag rePag desplazar
-  ctrl+T selector de temas · f1 ayuda · ctrl+Q salir
+  F1 o ctrl+H ayuda · ctrl+T selector de temas · ctrl+Q salir
+  ctrl+W quién está · ctrl+F tu huella · ctrl+L limpiar el chat
+  ctrl+P QR de emparejamiento · ctrl+N tu apodo
 
 Comandos: /help · /nick · /who · /pair · /fp · /accept · /theme
 

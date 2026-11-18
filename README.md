@@ -80,8 +80,13 @@ Dentro del programa:
 | `intro` | enviar mensaje |
 | `tab` | cambiar de panel |
 | `↑ ↓` / `avpag` `rePag` | desplazar el chat |
+| `f1` o `ctrl+H` | ayuda (`/help`) |
+| `ctrl+W` | quién está en la malla (`/who`) |
+| `ctrl+F` | tu huella digital (`/fp`) |
+| `ctrl+P` | QR de emparejamiento (`/pair`) |
+| `ctrl+N` | tu apodo (`/nick`) |
+| `ctrl+L` | limpiar el chat (`/clear`) |
 | `ctrl+T` | selector de temas |
-| `f1` | ayuda |
 | `ctrl+Q` | salir (apaga la radio y guarda la config) |
 
 Comandos de chat:

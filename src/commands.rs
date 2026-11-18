@@ -94,7 +94,9 @@ pub fn help_text() -> Vec<String> {
         String::new(),
         "Teclas:".into(),
         "  intro enviar · tab panel · ↑↓ / avpag rePag desplazar".into(),
-        "  ctrl+T temas · ctrl+Q salir".into(),
+        "  F1 o ctrl+H ayuda      ctrl+T temas       ctrl+Q salir".into(),
+        "  ctrl+W quién está      ctrl+F tu huella    ctrl+L limpiar".into(),
+        "  ctrl+P QR de emparejar ctrl+N tu apodo".into(),
     ]
 }
 

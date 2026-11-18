@@ -493,12 +493,23 @@ impl App {
 
     /// Procesa una tecla pulsada.
     pub fn on_key(&mut self, key: KeyEvent) {
-        // Salida: ctrl+q (y ctrl+c, que en modo crudo no llega como señal).
+        // Salida y atajos: los comandos que más se usan, a un toque de
+        // distancia. Todos van por el mismo camino que la barra `/…`.
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
                 KeyCode::Char('q') | KeyCode::Char('c') => {
                     self.running = false;
                     return;
+                }
+                KeyCode::Char('h') | KeyCode::Char('?') => {
+                    return self.run_command(Command::Help);
+                }
+                KeyCode::Char('w') => return self.run_command(Command::Who),
+                KeyCode::Char('f') => return self.run_command(Command::Fp(None)),
+                KeyCode::Char('l') => return self.run_command(Command::Clear),
+                KeyCode::Char('p') => return self.run_command(Command::Pair),
+                KeyCode::Char('n') => {
+                    return self.run_command(Command::Nick(String::new()));
                 }
                 KeyCode::Char('t') => {
                     self.overlay = Some(Overlay::Themes {
@@ -673,7 +684,10 @@ impl App {
             Command::Quit => self.running = false,
             Command::Nick(new) => {
                 if new.is_empty() {
-                    self.system(format!("tu apodo es {}", self.nickname));
+                    self.system(format!(
+                        "tu apodo es {} — cámbialo con /nick NUEVO",
+                        self.nickname
+                    ));
                     return;
                 }
                 let old = std::mem::replace(&mut self.nickname, new.clone());
@@ -1038,6 +1052,34 @@ mod tests {
         input.home();
         input.delete();
         assert_eq!(input.as_str(), "and");
+    }
+
+    #[test]
+    fn atajos_de_teclado() {
+        let (mut app, _tx) = test_app();
+        // ctrl+W: quién está en la malla.
+        app.on_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        assert!(app.lines().iter().any(|l| l.text.contains("malla vacía")));
+        // ctrl+F: la huella propia, para comparar con el teléfono.
+        app.on_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
+        assert!(app.lines().iter().any(|l| l.text.contains("tu huella")));
+        // ctrl+L: limpia el chat.
+        app.on_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+        assert!(app.lines().is_empty());
+        // ctrl+P: QR de emparejamiento.
+        app.on_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));
+        assert!(matches!(app.overlay, Some(Overlay::Pair { .. })));
+        // F1 y ctrl+H: ayuda (los overlays se cierran con esc antes).
+        app.on_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(app.overlay.is_none());
+        app.on_key(KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE));
+        assert!(matches!(app.overlay, Some(Overlay::Help)));
+        app.overlay = None;
+        app.on_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::CONTROL));
+        assert!(matches!(app.overlay, Some(Overlay::Help)));
+        // ctrl+Q: salir.
+        app.on_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL));
+        assert!(!app.running);
     }
 
     #[test]
