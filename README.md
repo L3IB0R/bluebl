@@ -52,6 +52,12 @@ Página web: **https://bluebl.surge.sh**
 git clone https://github.com/L3IB0R/bluebl.git && cd bluebl && sh install.sh
 ```
 
+O en una línea, sin clonar nada:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/L3IB0R/bluebl/master/install.sh | sh
+```
+
 También puedes bajar el código desde las
 [releases](https://github.com/L3IB0R/bluebl/releases) y ejecutar
 `sh install.sh` dentro de la carpeta.

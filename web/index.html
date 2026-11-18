@@ -193,9 +193,11 @@
     <h2>Empezar en tres pasos</h2>
     <p class="lead">Sólo necesitas un ordenador o un móvil con terminal y Bluetooth.</p>
     <ol class="steps">
-      <li><b>Instala.</b> Clona el proyecto y ejecuta el instalador; se encarga
-          de todo lo que haga falta (Bluetooth, compilador) y deja BlueBl listo:
-          <br><code>git clone https://github.com/L3IB0R/bluebl.git &amp;&amp; cd bluebl &amp;&amp; sh install.sh</code></li>
+      <li><b>Instala.</b> Un solo comando se encarga de todo lo que haga
+          falta (Bluetooth, compilador) y deja BlueBl listo:
+          <br><code>curl -fsSL https://raw.githubusercontent.com/L3IB0R/bluebl/master/install.sh | sh</code>
+          <br><span style="color:var(--dim)">o clona el proyecto y ejecuta
+          <code>sh install.sh</code> dentro de la carpeta.</span></li>
       <li><b>Arranca.</b> Escribe <code>bluebl</code> en la terminal. Con
           <kbd>F</kbd>1 o <kbd>ctrl</kbd>+<kbd>H</kbd> tienes la ayuda, y con
           <kbd>ctrl</kbd>+<kbd>P</kbd> el QR para emparejar.</li>

@@ -26,7 +26,18 @@ err()  { printf '\033[1;31m error\033[0m %s\n' "$*" >&2; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
 usage() {
-    sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+    # Con el script en tubería (curl | sh) no hay archivo que leer.
+    if [ -f "$0" ]; then
+        sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+    else
+        printf '%s\n' \
+            "install.sh — instala BlueBl y todo lo que necesita para funcionar." \
+            "" \
+            "  sh install.sh            instala dependencias, compila e instala" \
+            "  sh install.sh -y         sin preguntas" \
+            "  sh install.sh --no-deps  no toca el sistema: sólo compila" \
+            "  sh install.sh --help     esta ayuda"
+    fi
     exit 0
 }
 
