@@ -17,6 +17,8 @@ móvil mediante un QR y todo lo que se envía va firmado por quien lo escribe.
  BlueBl · #general  ⌁ mesh ble · cómodo · Dracula · Chat
 ```
 
+Página web: **https://bluebl.surge.sh**
+
 ## Características
 
 - **Cero internet.** Sólo radio Bluetooth LE: anuncio, escaneo y mensajes
@@ -47,8 +49,12 @@ móvil mediante un QR y todo lo que se envía va firmado por quien lo escribe.
 ## Instalación rápida
 
 ```sh
-git clone <URL> && cd bluebl && sh install.sh
+git clone https://github.com/L3IB0R/bluebl.git && cd bluebl && sh install.sh
 ```
+
+También puedes bajar el código desde las
+[releases](https://github.com/L3IB0R/bluebl/releases) y ejecutar
+`sh install.sh` dentro de la carpeta.
 
 El instalador comprueba tu sistema, instala lo que falte (Bluetooth,
 compilador, cabeceras de D-Bus), compila BlueBl y lo deja en

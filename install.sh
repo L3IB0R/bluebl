@@ -17,7 +17,7 @@ ASSUME_YES=0
 WITH_DEPS=1
 # Rellénalo si algún día el código vive en otro sitio (se usa sólo cuando
 # ejecutas el script sin tener el código a mano).
-REPO_URL=""
+REPO_URL="https://github.com/L3IB0R/bluebl.git"
 
 info() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 ok()   { printf '\033[1;32m ok\033[0m %s\n' "$*"; }
