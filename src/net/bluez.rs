@@ -676,19 +676,37 @@ async fn handle_packet(
         }
         msg_type::MESSAGE => {
             // Texto plano (broadcast público) o payload binario con canal.
-            let (text, channel, claimed) = match ChatMessage::decode(&packet.payload) {
-                Ok(m) if !m.content.is_empty() && !m.sender.is_empty() => {
-                    (m.content, m.channel, Some(m.sender))
+            let decoded = ChatMessage::decode(&packet.payload)
+                .ok()
+                .filter(|m| !m.content.is_empty() && !m.sender.is_empty());
+            let (text, channel, claimed) = match decoded {
+                Some(m) => (m.content, m.channel, Some(m.sender)),
+                None => {
+                    // El binario que no se entiende (o que la app de
+                    // referencia reenvía mezclado con U+FFFD) jamás es un
+                    // mensaje: no se cuela en el general.
+                    let text = String::from_utf8_lossy(&packet.payload);
+                    if !is_plain_chat(&text) {
+                        wire_log(&format!(
+                            "drop MESSAGE {} B de {} {}",
+                            packet.payload.len(),
+                            hex::encode(packet.sender),
+                            hex::encode(&packet.payload[..packet.payload.len().min(200)])
+                        ));
+                        return;
+                    }
+                    (text.to_string(), None, None)
                 }
-                _ => (
-                    String::from_utf8_lossy(&packet.payload).to_string(),
-                    None,
-                    None,
-                ),
             };
             if text.is_empty() {
                 return;
             }
+            wire_log(&format!(
+                "MESSAGE de {} canal={:?} texto={:?}",
+                hex::encode(packet.sender),
+                channel,
+                text.chars().take(60).collect::<String>()
+            ));
             // El id completo (8 bytes en hex) deja a la TUI resolver el apodo.
             let from = hex::encode(packet.sender);
             let _ = events.send(MeshEvent::Message {
@@ -698,7 +716,12 @@ async fn handle_packet(
                 text,
             });
         }
-        _ => {}
+        other => {
+            wire_log(&format!(
+                "tipo {other:#04x} ignorado de {}",
+                hex::encode(packet.sender)
+            ));
+        }
     }
 
     // Retransmisión (flood) mientras quede TTL. Los MDs van directos al
@@ -708,6 +731,29 @@ async fn handle_packet(
         if let Ok(relayed) = packet.encode(true) {
             broadcast(links, &relayed, char, conn, from.as_ref()).await;
         }
+    }
+}
+
+/// ¿Es texto plano de chat — y no binario ni texto mezclado por la app al
+/// reenviarlo? Los U+FFFD y los controles (salvo salto de línea) delatan
+/// un payload que no debería mostrarse como mensaje.
+fn is_plain_chat(s: &str) -> bool {
+    !s.is_empty()
+        && !s.contains('\u{FFFD}')
+        && s.chars()
+            .all(|c| !c.is_control() || c == '\n' || c == '\t' || c == '\r')
+}
+
+/// Registro de diagnóstico del wire (best-effort, en /tmp): sirve para
+/// ver qué llega de verdad sin ensuciar la interfaz.
+fn wire_log(msg: &str) {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/bluebl_wire.log")
+    {
+        let _ = writeln!(f, "[{}] {msg}", crate::app::now_hm());
     }
 }
 
@@ -824,4 +870,26 @@ async fn unregister_advertisement(
         .await
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_plain_chat;
+
+    #[test]
+    fn texto_plano_pasa() {
+        assert!(is_plain_chat("hola a todos"));
+        assert!(is_plain_chat("ñandú ✦ lluvia\nsegunda línea"));
+    }
+
+    #[test]
+    fn binario_o_mezcla_no_pasa() {
+        // El garbled que devolvía la app: U+FFFD de sus trascodificaciones.
+        assert!(!is_plain_chat(
+            "\u{FFFD}\u{FFFD}d?\"f92f4cfe18e90153Kaomiho@dm"
+        ));
+        // Payload binario de verdad (bytes de control).
+        assert!(!is_plain_chat("hola\u{1}mundo"));
+        assert!(!is_plain_chat(""));
+    }
 }

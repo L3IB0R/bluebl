@@ -1305,6 +1305,29 @@ mod tests {
     }
 
     #[test]
+    fn md_wire_round_trip_completo() {
+        // El camino exacto de un MD: transmit() construye, el receptor
+        // decodifica. Si esto falla, el MD no funciona en la malla.
+        use crate::proto::packet::msg_type;
+        use crate::proto::Packet;
+        let id = Identity::generate();
+        let target: crate::proto::PeerId = [0x55; 8];
+        let mut m = crate::proto::ChatMessage::new("kaomi", "hola en privado");
+        m.channel = Some("@dm".to_string());
+        let mut pkt = Packet::new(msg_type::MESSAGE, id.peer_id(), m.encode());
+        pkt.recipient = Some(target);
+        pkt.sign(id.signing_key()).unwrap();
+        let bytes = pkt.encode(true).unwrap();
+
+        let dec = Packet::decode(&bytes).expect("el receptor debe leer el packet");
+        assert_eq!(dec.recipient, Some(target));
+        let m2 = crate::proto::ChatMessage::decode(&dec.payload).expect("payload legible");
+        assert_eq!(m2.content, "hola en privado");
+        assert_eq!(m2.channel.as_deref(), Some("@dm"));
+        assert_eq!(m2.sender, "kaomi");
+    }
+
+    #[test]
     fn eco_propio_no_se_duplica() {
         let (mut app, tx) = test_app();
         let mine = app.peer_id_hex();
