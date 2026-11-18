@@ -1,17 +1,19 @@
 # BlueBl
 
-Chat **malla por Bluetooth LE** en la terminal: sin internet, sin servidores,
-sin nubes. Cada equipo que se acerca se convierte en un nodo de la conversación
-y los mensajes saltan de nodo en nodo hasta llegar.
+**Habla sin internet.** BlueBl es una aplicación de terminal para conversar por
+Bluetooth con quien esté cerca: sin WiFi, sin datos móviles y sin servidores.
+Si hay una persona a unos metros, ya podéis hablar — y si hay más entre medias,
+los mensajes saltan solos de uno a otro hasta llegar.
+
+Va ligera y cabe en pantallas pequeñas, trae 42 temas, se empareja con la app
+móvil mediante un QR y todo lo que se envía va firmado por quien lo escribe.
 
 ```
- ┌ Canales ─────────┐ ┌ #general ───────────────────────────────┐
- │▸ #general        │ │ [04:12] akaomi: ¿me ves?                │
- │  #charla         │ │ [04:12] ♥ 6a3f: sí, malla viva           │
- │                  │ │                                          │
- ├ Pares            │ │                                          │
- │  ♥ 6a3f  ♥ 2c81  │ │                                          │
- └──────────────────┘ └──────────────────────────────────────────┘
+ ┌ Pares ────────────┐ ┌ #general ───────────────────────────────┐
+ │ ★ akaomi 5ff83ae9 │ │ [04:12] akaomi: ¿me ves?                │
+ │ ● 6a3f   ♥ 2c81   │ │ [04:12] kaomi: sí, malla viva           │
+ │                   │ │                                          │
+ └───────────────────┘ └──────────────────────────────────────────┘
  BlueBl · #general  ⌁ mesh ble · cómodo · Dracula · Chat
 ```
 
@@ -35,11 +37,30 @@ y los mensajes saltan de nodo en nodo hasta llegar.
 - **42 temas** en cuatro categorías (base y accesibilidad, terminales,
   juegos, cine), con selector en caliente (Ctrl+T) y persistencia.
 - **Panel adaptable.** Pantalla ancha con la lista de pares a la izquierda;
-  en pantallas estrechas (Termux, Windows) un solo panel que cambias con Tab.
+  en pantallas estrechas (Termux o cualquier consola pequeña) un solo panel
+  que cambias con Tab.
   Tres densidades de texto: `compacto`, `comodo`, `grande`.
 - **Detección de dependencias** estilo terminal: `--deps` comprueba radio,
   servicio y adaptador, e indica el comando exacto para instalar lo que
   falte en tu distribución (o en Termux).
+
+## Instalación rápida
+
+```sh
+git clone <URL> && cd bluebl && sh install.sh
+```
+
+El instalador comprueba tu sistema, instala lo que falte (Bluetooth,
+compilador, cabeceras de D-Bus), compila BlueBl y lo deja en
+`~/.local/bin/bluebl`. Opciones:
+
+```sh
+sh install.sh -y         # sin preguntas
+sh install.sh --no-deps  # no toca el sistema: sólo compila e instala
+```
+
+Sólo pide permiso de administrador para los paquetes del sistema; todo lo
+demás ocurre en tu usuario.
 
 ## Requisitos
 
