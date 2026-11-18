@@ -158,9 +158,24 @@ fn draw_peers(f: &mut Frame, app: &App, area: Rect) {
     } else {
         app.peers
             .iter()
-            .map(|p| {
+            .enumerate()
+            .map(|(i, p)| {
+                // El cursor sólo se muestra con el foco en este panel.
+                let (symbol, st) = if i == app.peer_sel && app.panel == Panel::Pares {
+                    (
+                        "▸ ",
+                        Style::default()
+                            .fg(pal.bg)
+                            .bg(pal.accent)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    ("● ", Style::default().fg(pal.accent2))
+                };
+                let star = if p.verified { "★ " } else { "" };
                 Line::from(vec![
-                    Span::styled("● ", style(pal.accent2)),
+                    Span::styled(symbol, st),
+                    Span::styled(star, Style::default().fg(pal.accent)),
                     Span::styled(p.nickname.clone(), style(pal.fg)),
                     Span::styled(format!(" {}", &p.id[..8]), style(pal.dim)),
                 ])
@@ -215,6 +230,14 @@ fn draw_chat(f: &mut Frame, app: &App, area: Rect, bordered: bool) {
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(msg.text.clone(), Style::default().fg(pal.peer_msg)),
+            ])),
+            LineKind::Direct => lines.push(Line::from(vec![
+                ts,
+                Span::styled(
+                    format!("✉ {}: ", msg.sender),
+                    Style::default().fg(pal.accent).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(msg.text.clone(), Style::default().fg(pal.fg)),
             ])),
             LineKind::System => lines.push(Line::from(vec![
                 Span::styled(" ", Style::default().fg(pal.bg)),
@@ -321,10 +344,18 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
 
 fn draw_overlay(f: &mut Frame, app: &App, area: Rect) {
     let pal = &app.theme().palette;
-    let w = (area.width * 7 / 10).max(40).min(area.width);
+    let w = match &app.overlay {
+        // El QR pide su ancho exacto (si no cabe, se recorta).
+        Some(Overlay::Pair { qr, .. }) if !qr.is_empty() => {
+            let qr_w = qr.iter().map(|l| l.chars().count()).max().unwrap_or(0) as u16;
+            (qr_w + 6).min(area.width).max(40)
+        }
+        _ => (area.width * 7 / 10).max(40).min(area.width),
+    };
     let h = match &app.overlay {
         Some(Overlay::Help) => (commands::help_text().len() as u16 + 4).min(area.height),
         Some(Overlay::Themes { .. }) => (area.height * 8 / 10).max(10),
+        Some(Overlay::Pair { qr, .. }) => (qr.len() as u16 + 4).min(area.height),
         None => return,
     };
     let x = area.x + (area.width - w) / 2;
@@ -345,6 +376,21 @@ fn draw_overlay(f: &mut Frame, app: &App, area: Rect) {
                 .collect();
             let inner = block.inner(rect);
             f.render_widget(block.title(" ayuda "), rect);
+            f.render_widget(Paragraph::new(lines), inner);
+        }
+        Some(Overlay::Pair { qr, .. }) => {
+            let inner = block.inner(rect);
+            f.render_widget(block.title(" emparejamiento · esc cierra "), rect);
+            // Blanco y negro puro: es lo que mejor lee una cámara.
+            let lines: Vec<Line> = qr
+                .iter()
+                .map(|l| {
+                    Line::from(Span::styled(
+                        l.clone(),
+                        Style::default().fg(Color::Black).bg(Color::White),
+                    ))
+                })
+                .collect();
             f.render_widget(Paragraph::new(lines), inner);
         }
         Some(Overlay::Themes { selected }) => {

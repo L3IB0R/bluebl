@@ -95,7 +95,23 @@ impl Panel {
 #[derive(Clone, Debug)]
 pub enum Overlay {
     Help,
-    Themes { selected: usize },
+    Themes {
+        selected: usize,
+    },
+    /// Código de emparejamiento con su QR.
+    Pair {
+        code: String,
+        qr: Vec<String>,
+    },
+}
+
+/// Contacto verificado por emparejamiento: no es un random de la malla.
+#[derive(Clone, Debug)]
+pub struct Contact {
+    pub id: String,
+    pub nickname: String,
+    pub noise_public: String,
+    pub signing_public: String,
 }
 
 /// Clase de una línea del chat.
@@ -103,6 +119,8 @@ pub enum Overlay {
 pub enum LineKind {
     Own,
     Peer,
+    /// Mensaje privado (MD) entrante.
+    Direct,
     System,
     Error,
     Action,
@@ -122,6 +140,8 @@ pub struct ChatLine {
 pub struct Peer {
     pub id: String,
     pub nickname: String,
+    /// Contacto verificado por emparejamiento (★): no es un random.
+    pub verified: bool,
 }
 
 /// Caja de texto con cursor por caracteres (UTF-8 seguro).
@@ -199,6 +219,12 @@ pub struct App {
     pub channel_idx: usize,
     pub messages: HashMap<String, Vec<ChatLine>>,
     pub peers: Vec<Peer>,
+    /// Selección dentro del panel Pares (↑↓ con el foco ahí).
+    pub peer_sel: usize,
+    /// MDs abiertos: canal `@nick` → peer id del otro extremo.
+    pub dm_ids: HashMap<String, String>,
+    /// Contactos verificados (emparejados): peer id → contacto.
+    pub contacts: HashMap<String, Contact>,
     pub input: Input,
     pub status: String,
     pub panel: Panel,
@@ -220,6 +246,7 @@ impl App {
             .position(|t| t.id == config.theme)
             .unwrap_or(0);
         let density = Density::parse(&config.density).unwrap_or(Density::Comodo);
+        let contacts = load_contacts(&config);
         let mut messages = HashMap::new();
         messages.insert(
             "#general".to_string(),
@@ -242,6 +269,9 @@ impl App {
             channel_idx: 0,
             messages,
             peers: Vec::new(),
+            peer_sel: 0,
+            dm_ids: HashMap::new(),
+            contacts,
             input: Input::default(),
             status: "sin radio (fase de protocolo)".into(),
             panel: Panel::Chat,
@@ -324,17 +354,95 @@ impl App {
         self.scroll = 0;
     }
 
+    /// Mueve la selección de canal (foco en el panel Canales).
+    fn move_channel(&mut self, delta: isize) {
+        if self.channels.is_empty() {
+            return;
+        }
+        let len = self.channels.len() as isize;
+        let next = (self.channel_idx as isize + delta).rem_euclid(len) as usize;
+        if next != self.channel_idx {
+            self.channel_idx = next;
+            self.scroll = 0;
+        }
+    }
+
+    /// Mueve la selección de par (foco en el panel Pares).
+    fn move_peer(&mut self, delta: isize) {
+        if self.peers.is_empty() {
+            return;
+        }
+        let last = self.peers.len() - 1;
+        let cur = self.peer_sel.min(last) as isize;
+        self.peer_sel = (cur + delta).clamp(0, last as isize) as usize;
+    }
+
+    /// Abre (o reabre) el canal privado con un par y lo enfoca.
+    fn open_dm(&mut self, nick: &str, peer_id: &str) {
+        let ch = format!("@{nick}");
+        if !self.channels.contains(&ch) {
+            self.channels.push(ch.clone());
+        }
+        self.dm_ids.insert(ch.clone(), peer_id.to_string());
+        if let Some(idx) = self.channels.iter().position(|c| *c == ch) {
+            self.channel_idx = idx;
+            self.scroll = 0;
+        }
+    }
+
+    /// Código de emparejamiento de este nodo (id + claves + apodo).
+    fn pair_code(&self) -> String {
+        format!(
+            "BB1|{}|{}|{}|{}",
+            hex::encode(self.identity.peer_id()),
+            hex::encode(self.identity.noise_public()),
+            hex::encode(self.identity.signing_public()),
+            self.nickname.replace('|', "_"),
+        )
+    }
+
     /// Procesa los eventos que llegan del backend de malla.
     pub fn drain_mesh(&mut self) {
         while let Ok(ev) = self.rx.try_recv() {
             match ev {
-                MeshEvent::PeerJoined { id, nickname } => {
-                    if !self.peers.iter().any(|p| p.id == id) {
-                        self.peers.push(Peer {
-                            id: id.clone(),
-                            nickname: nickname.clone(),
-                        });
-                        self.system(format!("• {nickname} se une a la malla"));
+                MeshEvent::PeerJoined {
+                    id,
+                    nickname,
+                    noise_public,
+                    signing_public,
+                } => {
+                    // Un contacto se verifica por sus claves: si cambian,
+                    // no es (ya no es) la persona que emparejaste.
+                    let known = self.contacts.get(&id);
+                    let verified = known.is_some_and(|c| {
+                        c.noise_public == noise_public && c.signing_public == signing_public
+                    });
+                    match self.peers.iter().position(|p| p.id == id) {
+                        None => {
+                            self.peers.push(Peer {
+                                id: id.clone(),
+                                nickname: nickname.clone(),
+                                verified,
+                            });
+                            if verified {
+                                self.system(format!("★ {nickname} — contacto verificado"));
+                            } else if known.is_some() {
+                                self.system(format!(
+                                    "⚠ {nickname} está en tus contactos pero su clave cambió"
+                                ));
+                            } else {
+                                self.system(format!("• {nickname} se une a la malla"));
+                            }
+                        }
+                        Some(pos) => {
+                            // Anuncio repetido: se actualiza el apodo y el
+                            // estado de contacto sin spamear el chat.
+                            let p = &mut self.peers[pos];
+                            if p.nickname != nickname {
+                                p.nickname = nickname;
+                            }
+                            p.verified = verified;
+                        }
                     }
                 }
                 MeshEvent::PeerLeft { id } => {
@@ -362,16 +470,24 @@ impl App {
                         .or(nick.filter(|n| !n.is_empty()))
                         .unwrap_or_else(|| from.chars().take(8).collect());
 
-                    // El broadcast de texto plano es de #general, no del
-                    // canal en el que estés mirando.
-                    let ch = channel.unwrap_or_else(|| "#general".to_string());
+                    // Un MD se abre como "@nick de quien escribe"; el resto
+                    // va a su canal (#general si el texto es plano).
+                    let ch = match &channel {
+                        Some(c) if c.starts_with('@') => format!("@{sender}"),
+                        other => other.clone().unwrap_or_else(|| "#general".to_string()),
+                    };
                     if !self.channels.contains(&ch) {
                         self.channels.push(ch.clone());
                         self.system(format!("nuevo canal: {ch}"));
                     }
+                    let kind = if ch.starts_with('@') {
+                        LineKind::Direct
+                    } else {
+                        LineKind::Peer
+                    };
                     self.messages.entry(ch.clone()).or_default().push(ChatLine {
                         time: now_hm(),
-                        kind: LineKind::Peer,
+                        kind,
                         sender,
                         text,
                     });
@@ -410,6 +526,10 @@ impl App {
                 Overlay::Help => match key.code {
                     KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') | KeyCode::F(1) => {}
                     _ => self.overlay = Some(Overlay::Help),
+                },
+                Overlay::Pair { code, qr } => match key.code {
+                    KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => {}
+                    _ => self.overlay = Some(Overlay::Pair { code, qr }),
                 },
                 Overlay::Themes { mut selected } => match key.code {
                     KeyCode::Esc | KeyCode::Char('q') => {}
@@ -458,8 +578,18 @@ impl App {
             KeyCode::Tab => self.panel = self.panel.next(),
             KeyCode::Enter => self.send(),
             KeyCode::Esc => self.input.clear(),
-            KeyCode::Up => self.scroll_up(3),
-            KeyCode::Down => self.scroll_down(3),
+            // Con el foco en un panel lateral, ↑↓ seleccionan ahí; en el
+            // chat siguen desplazando la conversación.
+            KeyCode::Up => match self.panel {
+                Panel::Canales => self.move_channel(-1),
+                Panel::Pares => self.move_peer(-1),
+                Panel::Chat => self.scroll_up(3),
+            },
+            KeyCode::Down => match self.panel {
+                Panel::Canales => self.move_channel(1),
+                Panel::Pares => self.move_peer(1),
+                Panel::Chat => self.scroll_down(3),
+            },
             KeyCode::PageUp => self.scroll_up(20),
             KeyCode::PageDown => self.scroll_down(20),
             KeyCode::Home if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -491,6 +621,19 @@ impl App {
                 None => self.error("comando incompleto — /help"),
             }
         } else {
+            // Con el foco en Pares, escribir es un MD al par seleccionado:
+            // ni se pasa por el general ni lo ven los demás.
+            if self.panel == Panel::Pares {
+                if self.peers.is_empty() {
+                    self.error("no hay pares cerca todavía");
+                    return;
+                }
+                let idx = self.peer_sel.min(self.peers.len() - 1);
+                let nick = self.peers[idx].nickname.clone();
+                let id = self.peers[idx].id.clone();
+                self.open_dm(&nick, &id);
+                self.panel = Panel::Chat;
+            }
             let line = ChatLine {
                 time: now_hm(),
                 kind: LineKind::Own,
@@ -512,34 +655,69 @@ impl App {
             return; // sin radio: el mensaje se quedó en pantalla
         };
 
+        // Un MD lleva el id del otro extremo en el `recipient` de la
+        // cabecera: sólo el destinatario lo descifra y nadie lo reenvía.
+        let mut target: Option<String> = None;
+        if let Some(dm_nick) = self.channel().strip_prefix('@') {
+            let found = self.dm_ids.get(self.channel()).cloned().or_else(|| {
+                self.peers
+                    .iter()
+                    .find(|p| p.nickname == dm_nick)
+                    .map(|p| p.id.clone())
+            });
+            let Some(id) = found else {
+                self.error(format!("«{dm_nick}» ya no está en la malla"));
+                return;
+            };
+            target = Some(id);
+        }
+
         // En el canal público viaja texto plano (como la app de referencia);
-        // en el resto, payload binario con el canal marcado.
+        // en el resto, payload binario con el canal marcado. Los MDs usan
+        // el marcador fijo "@dm": el receptor abre el canal con el nick
+        // del emisor, no con el nombre local que le pusimos aquí.
         let channel = self.channel().to_string();
         let payload = if channel == "#general" {
             text.as_bytes().to_vec()
         } else {
             let mut m = ChatMessage::new(self.nickname.clone(), text);
-            m.channel = Some(channel);
+            m.channel = Some(if target.is_some() {
+                "@dm".to_string()
+            } else {
+                channel
+            });
             m.encode()
         };
 
         let mut pkt = Packet::new(msg_type::MESSAGE, self.identity.peer_id(), payload);
-        pkt.recipient = Some(BROADCAST);
+        pkt.recipient = match &target {
+            Some(id) => parse_peer_id(id),
+            None => Some(BROADCAST),
+        };
         if let Err(e) = pkt.sign(self.identity.signing_key()) {
             self.error(format!("no se pudo firmar: {e}"));
             return;
         }
 
+        // El envío por enlace: MD sólo al destinatario, el resto a todos.
+        let send_bytes = |bytes: Vec<u8>| -> bool {
+            match &target {
+                Some(id) => net
+                    .send(NetCommand::SendDm {
+                        peer_id: id.clone(),
+                        bytes,
+                    })
+                    .is_ok(),
+                None => net.send(NetCommand::SendPacket(bytes)).is_ok(),
+            }
+        };
+
         let sent = match fragment_packet(&pkt) {
             Ok(Some(frags)) => frags
                 .into_iter()
                 .filter_map(|f| f.encode(true).ok())
-                .map(|bytes| net.send(NetCommand::SendPacket(bytes)))
-                .all(|r| r.is_ok()),
-            Ok(None) => pkt
-                .encode(true)
-                .map(|bytes| net.send(NetCommand::SendPacket(bytes)).is_ok())
-                .unwrap_or(false),
+                .all(send_bytes),
+            Ok(None) => pkt.encode(true).map(send_bytes).unwrap_or(false),
             Err(e) => {
                 self.error(format!("no se pudo enviar: {e}"));
                 return;
@@ -603,12 +781,24 @@ impl App {
                     self.error("uso: /msg apodo texto");
                     return;
                 }
+                let Some(peer) = self
+                    .peers
+                    .iter()
+                    .find(|p| p.nickname.eq_ignore_ascii_case(&to))
+                    .cloned()
+                else {
+                    self.error(format!("no veo a «{to}» en la malla — prueba /who"));
+                    return;
+                };
+                self.open_dm(&peer.nickname, &peer.id);
+                self.panel = Panel::Chat;
                 self.push_line(ChatLine {
                     time: now_hm(),
-                    kind: LineKind::System,
-                    sender: String::new(),
-                    text: format!("→ {to}: {text} (sin radio: pendiente de entrega)"),
+                    kind: LineKind::Own,
+                    sender: self.nickname.clone(),
+                    text: text.clone(),
                 });
+                self.transmit(&text);
             }
             Command::Me(action) => {
                 if action.is_empty() {
@@ -629,7 +819,10 @@ impl App {
                     let names: Vec<String> = self
                         .peers
                         .iter()
-                        .map(|p| format!("● {} ({})", p.nickname, &p.id[..8]))
+                        .map(|p| {
+                            let star = if p.verified { "★ " } else { "" };
+                            format!("{star}{} ({})", p.nickname, &p.id[..8])
+                        })
                         .collect();
                     self.system(format!(
                         "{} en la malla: {}",
@@ -682,6 +875,40 @@ impl App {
                     }
                 }
             }
+            Command::Pair => {
+                let code = self.pair_code();
+                let qr = qr_lines(&code);
+                if qr.is_empty() {
+                    self.error("no se pudo dibujar el QR — usa el código de abajo");
+                } else {
+                    self.system("emparejamiento listo: escanea el QR (o copia el código)");
+                }
+                self.system(format!("tu código: {code}"));
+                self.overlay = Some(Overlay::Pair { code, qr });
+            }
+            Command::Accept(raw) => {
+                if raw.trim().is_empty() {
+                    self.error("uso: /accept BB1|… (el código completo)");
+                    return;
+                }
+                match parse_pair_code(&raw) {
+                    Ok(c) => {
+                        let id = c.id.clone();
+                        let msg = if self.contacts.contains_key(&id) {
+                            format!("★ {} ya era tu contacto", c.nickname)
+                        } else {
+                            format!("★ {} añadido a contactos verificados", c.nickname)
+                        };
+                        self.contacts.insert(id.clone(), c);
+                        save_contacts(&self.config, &self.contacts);
+                        if let Some(p) = self.peers.iter_mut().find(|p| p.id == id) {
+                            p.verified = true;
+                        }
+                        self.system(msg);
+                    }
+                    Err(e) => self.error(format!("código rechazado: {e}")),
+                }
+            }
             Command::Unknown(name) => {
                 self.error(format!("comando desconocido: /{name} — prueba /help"));
             }
@@ -700,6 +927,102 @@ pub fn now_hm() -> String {
     format!("{:02}:{:02}", (secs / 3600) % 24, (secs / 60) % 60)
 }
 
+/// Peer ID en hex de 16 caracteres → 8 bytes. Formato inválido: None.
+fn parse_peer_id(hex_id: &str) -> Option<crate::proto::PeerId> {
+    let bytes = hex::decode(hex_id).ok()?;
+    bytes.try_into().ok()
+}
+
+/// Ruta del archivo de contactos (hermano del config y de la identidad).
+fn contacts_path(config: &Config) -> std::path::PathBuf {
+    config.identity_path().with_file_name("contacts")
+}
+
+/// Carga los contactos: una línea `id|nick|noise|signing` por contacto.
+fn load_contacts(config: &Config) -> HashMap<String, Contact> {
+    let mut out = HashMap::new();
+    let Ok(text) = std::fs::read_to_string(contacts_path(config)) else {
+        return out;
+    };
+    for line in text.lines() {
+        let parts: Vec<&str> = line.split('|').collect();
+        if parts.len() == 4 && parts[0].len() == 16 {
+            out.insert(
+                parts[0].to_string(),
+                Contact {
+                    id: parts[0].to_string(),
+                    nickname: parts[1].to_string(),
+                    noise_public: parts[2].to_string(),
+                    signing_public: parts[3].to_string(),
+                },
+            );
+        }
+    }
+    out
+}
+
+/// Reescribe el archivo de contactos completo (es pequeño).
+fn save_contacts(config: &Config, contacts: &HashMap<String, Contact>) {
+    let path = contacts_path(config);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let mut body = String::from("# contactos verificados de BlueBl\n");
+    for c in contacts.values() {
+        body.push_str(&format!(
+            "{}|{}|{}|{}\n",
+            c.id, c.nickname, c.noise_public, c.signing_public
+        ));
+    }
+    let _ = std::fs::write(path, body);
+}
+
+/// Validación de un código BB1: el id debe derivar de la clave pública
+/// ruidosa (la misma regla canónica que el announce).
+fn parse_pair_code(raw: &str) -> Result<Contact, String> {
+    let code = raw.trim();
+    let parts: Vec<&str> = code.split('|').collect();
+    if parts.len() != 5 || parts[0] != "BB1" {
+        return Err("no es un código BlueBl (empieza por BB1|)".into());
+    }
+    if parts[2].len() != 64 || parts[3].len() != 64 {
+        return Err("las claves del código tienen un tamaño inválido".into());
+    }
+    let noise: [u8; 32] = hex::decode(parts[2])
+        .map_err(|_| "clave pública ilegible".to_string())?
+        .try_into()
+        .map_err(|_| "clave pública con tamaño distinto de 32 bytes".to_string())?;
+    let _: [u8; 32] = hex::decode(parts[3])
+        .map_err(|_| "clave de firma ilegible".to_string())?
+        .try_into()
+        .map_err(|_| "clave de firma con tamaño distinto de 32 bytes".to_string())?;
+    if !crate::identity::matches_claimed_peer_id(parts[1], &noise) {
+        return Err("el id no corresponde a esa clave pública".into());
+    }
+    if parts[4].is_empty() {
+        return Err("el código no trae apodo".into());
+    }
+    Ok(Contact {
+        id: parts[1].to_string(),
+        nickname: parts[4].to_string(),
+        noise_public: parts[2].to_string(),
+        signing_public: parts[3].to_string(),
+    })
+}
+
+/// Dibuja un QR como bloques Unicode para el overlay.
+fn qr_lines(code: &str) -> Vec<String> {
+    let Ok(qr) = qrcode::QrCode::new(code.as_bytes()) else {
+        return Vec::new();
+    };
+    qr.render::<qrcode::render::unicode::Dense1x2>()
+        .quiet_zone(true)
+        .build()
+        .split('\n')
+        .map(str::to_string)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -707,9 +1030,15 @@ mod tests {
 
     fn test_app() -> (App, std::sync::mpsc::Sender<MeshEvent>) {
         let (tx, rx) = channel();
+        // Subdirectorio propio: los tests no pisan la config real ni se
+        // pisan entre sí al persistir identidad/contactos.
         let cfg = Config {
             nick: "prueba".into(),
-            path: Some(std::env::temp_dir().join("bluebl-test-config")),
+            path: Some(
+                std::env::temp_dir()
+                    .join(format!("bluebl-tests-{}", std::process::id()))
+                    .join("config"),
+            ),
             ..Config::default()
         };
         (App::new(cfg, rx, Identity::generate()), tx)
@@ -798,6 +1127,8 @@ mod tests {
         tx.send(MeshEvent::PeerJoined {
             id: "aabbccdd00112233".into(),
             nickname: "luna".into(),
+            noise_public: String::new(),
+            signing_public: String::new(),
         })
         .unwrap();
         tx.send(MeshEvent::Message {
@@ -820,6 +1151,8 @@ mod tests {
         tx.send(MeshEvent::PeerJoined {
             id: "aabbccdd00112233".into(),
             nickname: "luna".into(),
+            noise_public: String::new(),
+            signing_public: String::new(),
         })
         .unwrap();
         // El announce está validado por clave pública: manda sobre lo que
@@ -887,6 +1220,174 @@ mod tests {
         .unwrap();
         app.drain_mesh();
         assert!(app.lines().iter().all(|l| l.text != "hola"));
+    }
+
+    #[test]
+    fn foco_en_canales_cambia_el_canal() {
+        let (mut app, _tx) = test_app();
+        for c in "/join #neon".chars() {
+            app.input.insert(c);
+        }
+        app.send();
+        assert_eq!(app.channel(), "#neon");
+
+        app.panel = Panel::Canales;
+        app.on_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+        assert_eq!(app.channel(), "#general"); // envuelve hacia atrás
+        app.on_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        assert_eq!(app.channel(), "#neon");
+        // En el chat, ↑↓ siguen desplazando la conversación.
+        app.panel = Panel::Chat;
+        app.on_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        assert_eq!(app.channel(), "#neon");
+    }
+
+    #[test]
+    fn escribir_con_foco_en_pares_abre_un_md() {
+        let (mut app, tx) = test_app();
+        tx.send(MeshEvent::PeerJoined {
+            id: "aabbccdd00112233".into(),
+            nickname: "luna".into(),
+            noise_public: String::new(),
+            signing_public: String::new(),
+        })
+        .unwrap();
+        app.drain_mesh();
+
+        app.panel = Panel::Pares;
+        for c in "hola en privado".chars() {
+            app.input.insert(c);
+        }
+        app.send();
+
+        // El canal pasa a ser el MD con luna y el foco vuelve al chat.
+        assert_eq!(app.channel(), "@luna");
+        assert_eq!(app.panel, Panel::Chat);
+        let last = app.lines().last().unwrap();
+        assert_eq!(last.kind, LineKind::Own);
+        assert_eq!(last.text, "hola en privado");
+    }
+
+    #[test]
+    fn md_entrante_abre_canal_con_el_emisor() {
+        let (mut app, tx) = test_app();
+        tx.send(MeshEvent::PeerJoined {
+            id: "aabbccdd00112233".into(),
+            nickname: "luna".into(),
+            noise_public: String::new(),
+            signing_public: String::new(),
+        })
+        .unwrap();
+        tx.send(MeshEvent::Message {
+            from: "aabbccdd00112233".into(),
+            nick: Some("luna".into()),
+            channel: Some("@dm".into()),
+            text: "para tus ojos solos".into(),
+        })
+        .unwrap();
+        app.drain_mesh();
+
+        assert!(app.channels.iter().any(|c| c == "@luna"));
+        let dm = app.messages.get("@luna").expect("canal del MD");
+        assert_eq!(dm.last().unwrap().kind, LineKind::Direct);
+        assert_eq!(dm.last().unwrap().sender, "luna");
+        // No se cuela en el general.
+        assert!(app
+            .messages
+            .get("#general")
+            .unwrap()
+            .iter()
+            .all(|l| l.text != "para tus ojos solos"));
+    }
+
+    #[test]
+    fn msg_abre_el_md_directo() {
+        let (mut app, tx) = test_app();
+        tx.send(MeshEvent::PeerJoined {
+            id: "aabbccdd00112233".into(),
+            nickname: "luna".into(),
+            noise_public: String::new(),
+            signing_public: String::new(),
+        })
+        .unwrap();
+        app.drain_mesh();
+
+        for c in "/msg luna ¿por aquí?".chars() {
+            app.input.insert(c);
+        }
+        app.send();
+
+        assert_eq!(app.channel(), "@luna");
+        let dm = app.messages.get("@luna").unwrap();
+        assert_eq!(dm.last().unwrap().kind, LineKind::Own);
+        assert_eq!(dm.last().unwrap().text, "¿por aquí?");
+    }
+
+    /// Código de un "otro" node, como lo produciría /pair.
+    fn codigo_de_otros(nick: &str) -> String {
+        let other = Identity::generate();
+        format!(
+            "BB1|{}|{}|{}|{}",
+            hex::encode(other.peer_id()),
+            hex::encode(other.noise_public()),
+            hex::encode(other.signing_public()),
+            nick
+        )
+    }
+
+    #[test]
+    fn pair_genera_codigo_y_qr() {
+        let (mut app, _tx) = test_app();
+        app.run_command(Command::Pair);
+        let Some(Overlay::Pair { code, qr }) = &app.overlay else {
+            panic!("debería abrirse el overlay de emparejamiento");
+        };
+        assert!(code.starts_with("BB1|"));
+        assert!(!qr.is_empty(), "el QR debe dibujarse");
+        // El código propio apunta a nuestra identidad.
+        assert!(code.contains(&app.peer_id_hex()));
+    }
+
+    #[test]
+    fn accept_verifica_y_marca_contacto() {
+        let (mut app, tx) = test_app();
+        let code = codigo_de_otros("luna");
+        app.run_command(Command::Accept(code.clone()));
+        assert_eq!(app.contacts.len(), 1);
+
+        // El par en la malla queda marcado con ★ sólo si sus claves del
+        // announce coinciden con las del código.
+        let parts: Vec<&str> = code.split('|').collect();
+        tx.send(MeshEvent::PeerJoined {
+            id: parts[1].to_string(),
+            nickname: "luna".into(),
+            noise_public: parts[2].to_string(),
+            signing_public: parts[3].to_string(),
+        })
+        .unwrap();
+        app.drain_mesh();
+        assert!(app.peers[0].verified, "claves coincidentes → ★");
+
+        // Un announce con otras claves (mismo id) NO es tu contacto.
+        tx.send(MeshEvent::PeerJoined {
+            id: parts[1].to_string(),
+            nickname: "luna".into(),
+            noise_public: "00".repeat(32),
+            signing_public: "11".repeat(32),
+        })
+        .unwrap();
+        app.drain_mesh();
+        assert!(!app.peers[0].verified, "claves distintas → no ★");
+
+        // Un código falsificado (id que no deriva de la clave) no entra.
+        let bad = codigo_de_otros("estafa");
+        let mut parts: Vec<String> = bad.split('|').map(str::to_string).collect();
+        parts[1] = "0000000000000000".into();
+        app.run_command(Command::Accept(parts.join("|")));
+        assert_eq!(app.contacts.len(), 1);
+
+        // No dejamos contactos de prueba en /tmp.
+        let _ = std::fs::remove_file(app.config.identity_path().with_file_name("contacts"));
     }
 
     #[test]

@@ -30,6 +30,10 @@ pub enum Command {
     Peers,
     /// `/deps` — comprobar dependencias del sistema (radio BLE).
     Deps,
+    /// `/pair` — generar el código/QR de emparejamiento.
+    Pair,
+    /// `/accept CÓDIGO` — verificar un código y añadir contacto (★).
+    Accept(String),
     /// Comando no reconocido (se reporta, no se envía como mensaje).
     Unknown(String),
 }
@@ -69,6 +73,8 @@ pub fn parse(input: &str) -> Option<Command> {
         "clear" => Command::Clear,
         "peers" | "nicks" => Command::Peers,
         "deps" | "doctor" => Command::Deps,
+        "pair" | "qr" => Command::Pair,
+        "accept" | "add" => Command::Accept(args.to_string()),
         // Comando desconocido: se reporta, no se envía como mensaje.
         other => Command::Unknown(other.to_string()),
     })
@@ -94,6 +100,8 @@ pub fn help_text() -> Vec<String> {
         "  /density NOMBRE   compacto · comodo · grande".into(),
         "  /clear            vaciar el canal actual".into(),
         "  /deps             comprobar la radio BLE del sistema".into(),
+        "  /pair             generar código/QR de emparejamiento".into(),
+        "  /accept CÓDIGO    verificar código y añadir contacto (★)".into(),
         "  /help             esta ayuda".into(),
         "  /quit             salir".into(),
         String::new(),

@@ -16,8 +16,10 @@ mod bluez;
 /// Lo que la interfaz le pide a la radio.
 #[derive(Clone, Debug)]
 pub enum NetCommand {
-    /// Packet ya codificado y firmado: transmitirlo a los vecinos.
+    /// Packet ya codificado y firmado: transmitirlo a todos los vecinos.
     SendPacket(Vec<u8>),
+    /// Packet dirigido (MD): sólo va al enlace de ese peer.
+    SendDm { peer_id: String, bytes: Vec<u8> },
     /// Cambiar el apodo visible en la malla.
     SetNickname(String),
     /// Parar el backend.

@@ -335,6 +335,7 @@ async fn run(
     let mut announce_tick = tokio::time::interval(ANNOUNCE_INTERVAL);
     announce_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let my_peer_hex = hex::encode(identity.peer_id());
+    let my_peer = identity.peer_id();
 
     // ── Bucle principal ─────────────────────────────────────────────────
     loop {
@@ -368,7 +369,7 @@ async fn run(
             // Paquetes que otros nos escriben en nuestra characteristic.
             Some(bytes) = incoming_rx.recv() => {
                 handle_packet(
-                    bytes, None, &links, &mut seen, &mut seen_order,
+                    bytes, None, &my_peer, &links, &mut seen, &mut seen_order,
                     &mut reassembler, events, &char, &conn,
                 ).await;
             }
@@ -376,7 +377,7 @@ async fn run(
             // Notificaciones de los vecinos a los que nos conectamos.
             Some((id, bytes)) = peer_rx.recv() => {
                 handle_packet(
-                    bytes, Some(id), &links, &mut seen, &mut seen_order,
+                    bytes, Some(id), &my_peer, &links, &mut seen, &mut seen_order,
                     &mut reassembler, events, &char, &conn,
                 ).await;
             }
@@ -386,6 +387,18 @@ async fn run(
                 match cmd {
                     NetCommand::SendPacket(bytes) => {
                         broadcast(&links, &bytes, &char, &conn, None).await;
+                    }
+                    NetCommand::SendDm { peer_id, bytes } => {
+                        // Un MD sólo toca el enlace del destinatario: ni el
+                        // resto de pares ni los suscritos a nuestro servicio.
+                        for link in links.values() {
+                            if link.peer_hex.as_deref() == Some(peer_id.as_str()) {
+                                let _ = link
+                                    .peripheral
+                                    .write(&link.characteristic, &bytes, WriteType::WithoutResponse)
+                                    .await;
+                            }
+                        }
                     }
                     NetCommand::SetNickname(new) => {
                         // El anuncio y el announce periódico usan este nick:
@@ -592,6 +605,7 @@ async fn send_announce(
 async fn handle_packet(
     bytes: Vec<u8>,
     from: Option<PeripheralId>,
+    my_peer: &[u8; 8],
     links: &HashMap<PeripheralId, PeerLink>,
     seen: &mut HashSet<[u8; 8]>,
     seen_order: &mut VecDeque<[u8; 8]>,
@@ -623,6 +637,14 @@ async fn handle_packet(
         packet = inner;
     }
 
+    // Un packet con destinatario que no somos nosotros: ni se entrega ni
+    // se retransmite (así viajan los MDs).
+    if let Some(r) = packet.recipient {
+        if r != BROADCAST && r != *my_peer {
+            return;
+        }
+    }
+
     // Dedup: un eco con TTL ya decrementado tiene la misma clave.
     let key = dedup_key(&packet);
     if !seen.insert(key) {
@@ -648,6 +670,8 @@ async fn handle_packet(
             let _ = events.send(MeshEvent::PeerJoined {
                 id: claimed,
                 nickname: ann.nickname,
+                noise_public: hex::encode(ann.noise_public),
+                signing_public: hex::encode(ann.signing_public),
             });
         }
         msg_type::MESSAGE => {
@@ -677,8 +701,9 @@ async fn handle_packet(
         _ => {}
     }
 
-    // Retransmisión (flood) mientras quede TTL.
-    if packet.ttl > 1 {
+    // Retransmisión (flood) mientras quede TTL. Los MDs van directos al
+    // destinatario: reenviarlos a la malla sería ruido (y una fuga).
+    if packet.ttl > 1 && packet.recipient.is_none_or(|r| r == BROADCAST) {
         packet.ttl -= 1;
         if let Ok(relayed) = packet.encode(true) {
             broadcast(links, &relayed, char, conn, from.as_ref()).await;

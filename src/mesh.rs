@@ -11,6 +11,10 @@ pub enum MeshEvent {
     PeerJoined {
         id: String,
         nickname: String,
+        /// Claves públicas del announce (hex): con ellas la TUI comprueba
+        /// que un contacto conocido no cambió de identidad.
+        noise_public: String,
+        signing_public: String,
     },
     PeerLeft {
         id: String,
