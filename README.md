@@ -143,18 +143,15 @@ theme=pip-boy-verde
 density=comodo
 ```
 
-## Estado del proyecto
+## Agradecimientos
 
-| Fase | Contenido | Estado |
-|---|---|---|
-| 0 | Protocolo, identidad, temas, TUI, CLI | ✅ |
-| 1 | Radio BLE en Linux (BlueZ) | ✅ |
-| 2 | Termux y Windows | ⏳ |
-| 3 | Couriers, outbox, gossip, favoritos, panic wipe | ⏳ |
-
-La Fase 1 implementa el rol de peripheral (anuncio LE + servidor GATT) y el
-rol central (escaneo, conexión y escritura) sobre D-Bus, con retransmisión
-en malla y reensamblado de fragmentos.
+- **[bitchat](https://github.com/permissionlesstech/bitchat)** — la aplicación
+  móvil que inspira este proyecto. De ahí viene la idea de hablar sin internet
+  ni servidores, la manera de emparejar equipos con un QR y buena parte del
+  protocolo por el aire: BlueBl nace como su complemento en la terminal, y la
+  compatibilidad con ella se logró leyendo y estudiando su código con
+  detalle. Sin esa app abierta, esto no existiría.
+- A quienes prueban, avisan y aguantan los errores con buen humor.
 
 ## Licencia
 
