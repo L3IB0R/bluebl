@@ -63,7 +63,8 @@ También puedes bajar el código desde las
 `sh install.sh` dentro de la carpeta.
 
 El instalador comprueba tu sistema, instala lo que falte (Bluetooth,
-compilador, cabeceras de D-Bus), compila BlueBl y lo deja en
+compilador, cabeceras de D-Bus), **actualiza BlueZ si es anterior a la
+5.78** (hace falta para el anuncio LE), compila BlueBl y lo deja en
 `~/.local/bin/bluebl`. Opciones:
 
 ```sh
@@ -76,7 +77,10 @@ demás ocurre en tu usuario.
 
 ## Requisitos
 
-- **Linux** con BlueZ (casi todo lo trae ya).
+- **Linux** con BlueZ **5.78 o más** (casi todo lo trae ya; el instalador
+  comprueba la versión y lo actualiza si está viejo — en Ubuntu 24.04 /
+  Mint 22.x el repo oficial se queda en 5.72 y hace falta el PPA
+  `ppa:giner/bluez`, que el propio instalador añade).
   - Debian/Ubuntu: `sudo apt install bluez libdbus-1-dev`
   - Fedora: `sudo dnf install bluez dbus-devel`
   - Arch: `sudo pacman -S bluez bluez-utils dbus`
@@ -88,6 +92,46 @@ Comprueba tu equipo con:
 
 ```sh
 bluebl --deps
+```
+
+## Solución de problemas
+
+**`RegisterAdvertisement ... Invalid Parameters (0x0d)` o «sin radio»
+con BlueZ instalado.** Es el bug de publicidad extendida de BlueZ
+anterior a la 5.78: el daemon rechaza el anuncio LE y BlueBl no puede
+escuchar ni hablar. Solución, en orden:
+
+1. Mira qué versión tienes: `bluebl --deps` (o `bluetoothd -v`).
+2. Si es anterior a 5.78, actualiza:
+   - Ubuntu 24.04 / Mint 22.x / bases *noble* (el repo oficial sólo
+     llega a 5.72):
+
+     ```sh
+     sudo add-apt-repository ppa:giner/bluez
+     sudo apt update && sudo apt install bluez
+     ```
+
+   - El resto de distros, con tu gestor habitual
+     (`sudo apt install --only-upgrade bluez`, `sudo dnf upgrade bluez`,
+     `sudo pacman -Syu bluez`…). Busca el paquete en tu distro:
+     <https://pkgs.org/search/?q=bluez>
+3. Reinicia el servicio: `sudo systemctl restart bluetooth`.
+4. Vuelve a comprobar: `bluebl --deps` debe marcar
+   `✓ BlueZ (bluetoothd): 5.78` o superior.
+
+`sh install.sh` hace todos estos pasos por ti (con tu permiso) cuando
+detecta BlueZ viejo.
+
+**La radio aparece bloqueada.** Desbloquéala:
+
+```sh
+sudo rfkill unblock bluetooth
+```
+
+**El servicio no arranca.** Actívalo:
+
+```sh
+sudo systemctl enable --now bluetooth
 ```
 
 ## Compilar e instalar

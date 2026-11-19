@@ -121,7 +121,7 @@ fn main() -> std::io::Result<()> {
     if !bluebl::deps::radio_ready() {
         eprintln!(
             "bluebl: la radio BLE no está lista — {}",
-            bluebl::deps::install_command()
+            bluebl::deps::remedio()
         );
         eprintln!("        (estado completo: bluebl --deps o /deps dentro del programa)");
         eprintln!();

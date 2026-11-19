@@ -194,7 +194,8 @@
     <p class="lead">Sólo necesitas un ordenador o un móvil con terminal y Bluetooth.</p>
     <ol class="steps">
       <li><b>Instala.</b> Un solo comando se encarga de todo lo que haga
-          falta (Bluetooth, compilador) y deja BlueBl listo:
+          falta (Bluetooth, compilador, y actualiza BlueZ si es anterior a
+          la 5.78) y deja BlueBl listo:
           <br><code>curl -fsSL https://raw.githubusercontent.com/L3IB0R/bluebl/master/install.sh | sh</code>
           <br><span style="color:var(--dim)">o clona el proyecto y ejecuta
           <code>sh install.sh</code> dentro de la carpeta.</span></li>
@@ -209,7 +210,11 @@
     <div class="note" style="margin-top:20px">
       ¿Tu radio no arranca? Prueba con <code>sudo rfkill unblock bluetooth</code>
       y revisa el estado con <code>bluebl --deps</code>, que te dice exactamente
-      qué falta en tu equipo.
+      qué falta en tu equipo. Si ves <code>RegisterAdvertisement … Invalid
+      Parameters (0x0d)</code>, tu BlueZ es anterior a la 5.78: el instalador
+      te lo actualiza solo, o sigue la
+      <a href="https://github.com/L3IB0R/bluebl#soluci%C3%B3n-de-problemas">guía
+      de solución de problemas</a> del README.
     </div>
   </section>
 
@@ -243,9 +248,11 @@
   <section id="requisitos">
     <h2>Requisitos</h2>
     <div class="grid">
-      <div class="card"><h3>Sistema</h3><p>Linux con BlueZ (casi todos lo traen
-        ya) o Termux en Android. El binario se queda en
-        <code>~/.local/bin/bluebl</code>.</p></div>
+      <div class="card"><h3>Sistema</h3><p>Linux con BlueZ <strong>5.78 o
+        más</strong> (casi todos lo traen ya; si el tuyo es más viejo, el
+        instalador lo detecta y lo actualiza — en Ubuntu 24.04 / Mint 22.x
+        añade el PPA <code>ppa:giner/bluez</code>) o Termux en Android. El
+        binario se queda en <code>~/.local/bin/bluebl</code>.</p></div>
       <div class="card"><h3>Hardware</h3><p>Cualquier adaptador Bluetooth LE de
         los últimos años. Ni tarjeta gráfica, ni gran pantalla: la interfaz se
         adapta hasta pantallas de 36 columnas.</p></div>

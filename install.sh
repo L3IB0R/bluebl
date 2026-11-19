@@ -8,6 +8,9 @@
 #
 # Sólo pide sudo para instalar paquetes del sistema; el resto (compilar,
 # copiar el binario) va en tu directorio de usuario.
+#
+# Comprueba además que BlueZ no sea viejo (hace falta 5.78 o más) y, si
+# lo está, intenta actualizarlo por la vía de tu distro.
 
 set -eu
 
@@ -28,7 +31,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 usage() {
     # Con el script en tubería (curl | sh) no hay archivo que leer.
     if [ -f "$0" ]; then
-        sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+        sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
     else
         printf '%s\n' \
             "install.sh — instala BlueBl y todo lo que necesita para funcionar." \
@@ -36,7 +39,9 @@ usage() {
             "  sh install.sh            instala dependencias, compila e instala" \
             "  sh install.sh -y         sin preguntas" \
             "  sh install.sh --no-deps  no toca el sistema: sólo compila" \
-            "  sh install.sh --help     esta ayuda"
+            "  sh install.sh --help     esta ayuda" \
+            "" \
+            "También comprueba BlueZ (>= 5.78) y lo actualiza si hace falta."
     fi
     exit 0
 }
@@ -147,6 +152,146 @@ faltan_sistema() {
     fi
 }
 
+# ---------------------------------------------------------------- BlueZ
+# Con BlueZ anterior a la 5.78 el bug de publicidad extendida rechaza el
+# anuncio LE ("Invalid Parameters (0x0d)") y BlueBl se queda en "sin radio".
+
+# Versión de BlueZ ("5.72") o vacío si no se puede leer.
+bluez_version() {
+    v=""
+    if have bluetoothd; then
+        v=$(bluetoothd -v 2>/dev/null | head -n1)
+    elif [ -x /usr/libexec/bluetooth/bluetoothd ]; then
+        v=$(/usr/libexec/bluetooth/bluetoothd -v 2>/dev/null | head -n1)
+    elif [ -x /usr/sbin/bluetoothd ]; then
+        v=$(/usr/sbin/bluetoothd -v 2>/dev/null | head -n1)
+    fi
+    # Sin el daemon a mano, el paquete instalado también sirve.
+    if [ -z "$v" ] && have dpkg-query; then
+        v=$(dpkg-query -W -f='${Version}' bluez 2>/dev/null || true)
+    fi
+    if [ -z "$v" ] && have rpm; then
+        v=$(rpm -q --qf '%{VERSION}' bluez 2>/dev/null || true)
+    fi
+    # Sólo "mayor.menor" (quita epoch tipo "1:5.72-0ubuntu7").
+    printf '%s\n' "$v" | sed -n \
+        -e 's/^[0-9][0-9]*://' \
+        -e 's/^[^0-9]*\([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1.\2/p' |
+        head -n1
+}
+
+# 0 si la versión (mayor.menor) es anterior a 5.78.
+bluez_old() {
+    major=${1%%.*}
+    minor=${1#*.}
+    minor=${minor%%.*}
+    case "$major$minor" in
+        ""|*[!0-9]*) return 1 ;; # sin versión clara: no insistimos
+    esac
+    if [ "$major" -lt 5 ]; then return 0; fi
+    if [ "$major" -eq 5 ] && [ "$minor" -lt 78 ]; then return 0; fi
+    return 1
+}
+
+# Codename de la base Ubuntu (noble en Mint 22.x / Ubuntu 24.04).
+os_release_codename() {
+    [ -r /etc/os-release ] || return 0
+    # shellcheck disable=SC1091
+    (. /etc/os-release; printf '%s' "${UBUNTU_CODENAME:-${VERSION_CODENAME:-}}")
+}
+
+# Nombre bonito de la distro, para los mensajes.
+distro_nombre() {
+    [ -r /etc/os-release ] || { printf 'desconocida'; return 0; }
+    # shellcheck disable=SC1091
+    (. /etc/os-release; printf '%s' "${PRETTY_NAME:-$ID}")
+}
+
+# Actualización por el gestor propio de la distro.
+actualizar_bluez_nativo() {
+    case "$1" in
+        debian) as_root apt-get update -qq && as_root apt-get install -y bluez ;;
+        fedora) as_root dnf upgrade -y bluez ;;
+        arch)   as_root pacman -Syu --noconfirm bluez ;;
+        suse)   as_root zypper refresh && as_root zypper install -y bluez ;;
+        termux) pkg install -y bluez ;;
+        *)      return 1 ;;
+    esac
+}
+
+# Respaldo de la configuración de BlueZ antes de tocar el paquete.
+respaldo_main_conf() {
+    if [ -f /etc/bluetooth/main.conf ] && [ ! -f /etc/bluetooth/main.conf.bluebl-bak ]; then
+        as_root cp /etc/bluetooth/main.conf /etc/bluetooth/main.conf.bluebl-bak || true
+    fi
+}
+
+# Ruta en noble: PPA de backports de BlueZ (la que resolvió el caso real).
+actualizar_bluez_ppa() {
+    respaldo_main_conf
+    if ! have add-apt-repository; then
+        as_root apt-get install -y software-properties-common || return 1
+    fi
+    as_root add-apt-repository -y ppa:giner/bluez || return 1
+    as_root apt-get update -qq || return 1
+    as_root apt-get install -y bluez
+}
+
+# Plan B: descarga los .deb de la fuente real del PPA en Launchpad
+# (pkgs.org sólo lista; la descarga va al pool del PPA) y los instala.
+descargar_debs_bluez() {
+    arch=$1
+    pool="https://ppa.launchpadcontent.net/giner/bluez/ubuntu/pool/main/b/bluez"
+    if have curl; then
+        idx=$(curl -fsSL "$pool/") || return 1
+    elif have wget; then
+        idx=$(wget -qO- "$pool/") || return 1
+    else
+        return 1
+    fi
+    # Última versión de bluez y su libbluetooth3 para nuestra arquitectura.
+    deb=$(printf '%s\n' "$idx" | grep -o "bluez_[^\"]*_${arch}\\.deb" | sort -uV | tail -n1)
+    [ -n "$deb" ] || return 1
+    ver=${deb#bluez_}
+    ver=${ver%_"$arch".deb}
+    lib="libbluetooth3_${ver}_${arch}.deb"
+    printf '%s\n' "$idx" | grep -q -F "$lib" || return 1
+    tmp=$(mktemp -d) || return 1
+    if have curl; then
+        curl -fsSL -o "$tmp/$deb" "$pool/$deb" && curl -fsSL -o "$tmp/$lib" "$pool/$lib" ||
+            { rm -rf "$tmp"; return 1; }
+    else
+        wget -q -O "$tmp/$deb" "$pool/$deb" && wget -q -O "$tmp/$lib" "$pool/$lib" ||
+            { rm -rf "$tmp"; return 1; }
+    fi
+    st=0
+    (cd "$tmp" && as_root apt-get install -y "./$deb" "./$lib") || st=$?
+    rm -rf "$tmp"
+    return "$st"
+}
+
+# Arquitectura de los .deb del PPA (amd64 / i386); vacío si no aplica.
+deb_arch() {
+    case "$(uname -m)" in
+        x86_64) echo amd64 ;;
+        i?86)   echo i386 ;;
+        *)      echo "" ;;
+    esac
+}
+
+# Reinicia el servicio y espera a que levante.
+reiniciar_bluetooth() {
+    as_root systemctl restart bluetooth || return 1
+    i=0
+    while [ "$i" -lt 10 ]; do
+        if systemctl is-active --quiet bluetooth 2>/dev/null; then return 0; fi
+        sleep 1
+        i=$((i + 1))
+    done
+    return 1
+}
+
+
 # ------------------------------------------------------------------ pasos
 
 info "BlueBl — instalador"
@@ -198,6 +343,65 @@ if [ "$WITH_DEPS" -eq 1 ]; then
     fi
 else
     info "sin tocar el sistema (--no-deps)"
+fi
+
+# 2b. BlueZ viejo: sin 5.78 el bug de publicidad extendida rechaza el
+# anuncio LE ("Invalid Parameters (0x0d)") y BlueBl se queda en "sin radio".
+if [ "$WITH_DEPS" -eq 1 ]; then
+    bz=$(bluez_version)
+    if bluez_old "$bz"; then
+        warn "BlueZ $bz es viejo (hace falta 5.78 o más): el anuncio LE puede ser rechazado"
+        if ask "¿Intento actualizar BlueZ ahora?"; then
+            familia=$(platforma)
+            codename=$(os_release_codename)
+            hecho=0
+
+            # a) la vía propia de la distro
+            if actualizar_bluez_nativo "$familia"; then
+                nuevo=$(bluez_version)
+                if [ -n "$nuevo" ] && ! bluez_old "$nuevo"; then
+                    hecho=1
+                    ok "BlueZ $nuevo (gestor de la distro)"
+                fi
+            fi
+
+            # b) en bases noble el repo oficial se queda en 5.72: PPA
+            if [ "$hecho" -eq 0 ] && [ "$familia" = debian ] && [ "$codename" = noble ]; then
+                info "tu base es noble: pruebo el PPA de backports de BlueZ…"
+                if actualizar_bluez_ppa; then
+                    nuevo=$(bluez_version)
+                    if [ -n "$nuevo" ] && ! bluez_old "$nuevo"; then
+                        hecho=1
+                        ok "BlueZ $nuevo (PPA)"
+                    fi
+                fi
+                # c) plan B: los .deb directos del pool del PPA en Launchpad
+                if [ "$hecho" -eq 0 ]; then
+                    arch=$(deb_arch)
+                    if [ -n "$arch" ] && descargar_debs_bluez "$arch"; then
+                        nuevo=$(bluez_version)
+                        if [ -n "$nuevo" ] && ! bluez_old "$nuevo"; then
+                            hecho=1
+                            ok "BlueZ $nuevo (plan B: .deb del PPA)"
+                        fi
+                    fi
+                fi
+            fi
+
+            if [ "$hecho" -eq 1 ]; then
+                if have systemctl; then
+                    reiniciar_bluetooth ||
+                        warn "reinicia el servicio a mano: sudo systemctl restart bluetooth"
+                fi
+            else
+                warn "no he podido actualizarlo automáticamente; hazlo a mano con el gestor de tu distro"
+                warn "guía: https://pkgs.org/search/?q=bluez"
+            fi
+        else
+            warn "BlueZ se queda en $bz: sin 5.78 el anuncio LE puede ser rechazado"
+            warn "guía para actualizar: https://pkgs.org/search/?q=bluez"
+        fi
+    fi
 fi
 
 # 3. Rust (sin él no hay nada que compilar)
