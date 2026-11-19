@@ -125,6 +125,7 @@
       <a href="#que-es">Qué es</a>
       <a href="#empezar">Empezar</a>
       <a href="#atajos">Atajos</a>
+      <a href="#nodo">Modo nodo</a>
       <a href="#requisitos">Requisitos</a>
       <a href="https://github.com/L3IB0R/bluebl">GitHub</a>
     </nav>
@@ -232,6 +233,7 @@
           <tr><td><kbd>ctrl</kbd>+<kbd>N</kbd></td><td>Tu apodo</td><td><code>/nick</code></td></tr>
           <tr><td><kbd>ctrl</kbd>+<kbd>L</kbd></td><td>Limpiar el chat</td><td><code>/clear</code></td></tr>
           <tr><td><kbd>ctrl</kbd>+<kbd>T</kbd></td><td>Selector de temas</td><td><code>/theme</code></td></tr>
+          <tr><td><kbd>F6</kbd></td><td>Modo nodo (repetidor) — con confirmación</td><td><code>/nodo</code></td></tr>
           <tr><td><kbd>tab</kbd></td><td>Cambiar de panel</td><td>—</td></tr>
           <tr><td><kbd>ctrl</kbd>+<kbd>Q</kbd></td><td>Salir (apaga la radio)</td><td><code>/quit</code></td></tr>
         </tbody>
@@ -243,6 +245,26 @@
       <code>/density</code> (tamaño del texto) y <code>/deps</code>
       (estado de la radio).
     </p>
+  </section>
+
+  <section id="nodo">
+    <h2>Modo nodo (repetidor)</h2>
+    <p class="lead">¿Un equipo sobrante con Bluetooth? Ponlo a trabajar:
+      el modo nodo lo deja reenviando paquetes entre vecinos, sin
+      interfaz, para que la malla llegue más lejos.</p>
+    <div class="grid">
+      <div class="card"><h3>Desde el programa</h3><p><kbd>F6</kbd> (con
+        confirmación) o <code>/nodo</code>. La vista se queda mínima, sin
+        caja de escritura: sólo leer y salir con <kbd>F6</kbd>.</p></div>
+      <div class="card"><h3>En segundo plano</h3><p><code>bluebl
+        --nodo</code> lo arranca sin interfaz — ideal para un PC
+        fijo — y <code>bluebl --nodo --off</code> lo detiene. El log
+        queda en <code>~/.config/bluebl/nodo.log</code>.</p></div>
+      <div class="card"><h3>Qué reenvía (y qué no)</h3><p>Sólo el chat
+        público en difusión que ya circula por la malla. No hay mensajes
+        dirigidos ni privados entre teléfonos que BlueBl pueda
+        descifrar ni reenviar.</p></div>
+    </div>
   </section>
 
   <section id="requisitos">

@@ -7,6 +7,8 @@ pub mod deps;
 pub mod identity;
 pub mod mesh;
 pub mod net;
+#[cfg(unix)]
+pub mod nodo;
 pub mod pairing;
 pub mod proto;
 pub mod themes;

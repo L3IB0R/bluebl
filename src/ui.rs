@@ -22,13 +22,24 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     );
 
     let wide = area.width >= 100;
-    let rows = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Min(4),
-        Constraint::Length(app.density.input_height()),
-        Constraint::Length(1),
-    ])
-    .split(area);
+    // En modo nodo no hay caja de escritura: el hueco lo ocupa el chat.
+    let rows = if app.node_mode {
+        Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Min(4),
+            Constraint::Length(0),
+            Constraint::Length(1),
+        ])
+        .split(area)
+    } else {
+        Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Min(4),
+            Constraint::Length(app.density.input_height()),
+            Constraint::Length(1),
+        ])
+        .split(area)
+    };
 
     draw_header(f, app, rows[0]);
     if wide {
@@ -36,7 +47,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     } else {
         draw_narrow(f, app, rows[1]);
     }
-    draw_input(f, app, rows[2]);
+    if !app.node_mode {
+        draw_input(f, app, rows[2]);
+    }
     draw_status(f, app, rows[3]);
 
     if app.overlay.is_some() {
@@ -47,6 +60,21 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 fn style(color: Color) -> Style {
     Style::default().fg(color)
 }
+
+/// Texto de la confirmación de modo nodo. Honesto: dice lo que hace y lo
+/// que no hace.
+const NODO_TEXTO: &[&str] = &[
+    "Modo nodo (repetidor)",
+    "",
+    "Tu equipo pasará a reenviar los paquetes que reciba",
+    "hacia sus vecinos, con lo que la malla llega más lejos.",
+    "",
+    "Sólo se reenvía el chat público en difusión: no hay",
+    "mensajes dirigidos ni privados entre teléfonos que",
+    "puedas descifrar ni reenviar.",
+    "",
+    "Se activa con intro y se apaga con F6 (o /nodo).",
+];
 
 fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     let pal = &app.theme().palette;
@@ -281,7 +309,8 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
     let status = format!(" {} ", app.status);
 
     // Pistas de atajos a la derecha, en tono discreto. Escalera: se pinta
-    // la más completa que quepa entera en el ancho que sobra.
+    // la más completa que quepa entera en el ancho que sobra. En modo nodo
+    // sólo hay una pista: cómo se sale.
     const PISTAS: [&str; 5] = [
         "F1 ayuda · ^W quién · ^P QR · ^T temas · ^Q salir",
         "F1 ayuda · ^W quién · ^P QR · ^Q salir",
@@ -289,10 +318,16 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
         "F1 ayuda · ^Q salir",
         "F1 ayuda",
     ];
+    const PISTA_NODO: [&str; 3] = [
+        "F6 salir del nodo · F1 ayuda",
+        "F6 salir · F1 ayuda",
+        "F6 salir",
+    ];
 
     let width = area.width as usize;
     let fijo = left.chars().count() + channel.chars().count() + status.chars().count();
-    let pista = PISTAS
+    let escalera: &[&str] = if app.node_mode { &PISTA_NODO } else { &PISTAS };
+    let pista = escalera
         .iter()
         .find(|p| fijo + p.chars().count() <= width)
         .copied();
@@ -339,6 +374,7 @@ fn draw_overlay(f: &mut Frame, app: &App, area: Rect) {
         Some(Overlay::Themes { .. }) => (area.height * 8 / 10).max(10),
         Some(Overlay::Pair { qr, .. }) if qr.is_empty() => 8,
         Some(Overlay::Pair { qr, .. }) => (qr.len() as u16 + 4).min(area.height),
+        Some(Overlay::Nodo) => (NODO_TEXTO.len() as u16 + 4).min(area.height),
         None => return,
     };
     let x = area.x + (area.width - w) / 2;
@@ -397,6 +433,15 @@ fn draw_overlay(f: &mut Frame, app: &App, area: Rect) {
                 }
                 f.render_widget(Paragraph::new(lines), inner);
             }
+        }
+        Some(Overlay::Nodo) => {
+            let inner = block.inner(rect);
+            f.render_widget(block.title(" modo nodo · intro activa · esc cierra "), rect);
+            let lines: Vec<Line> = NODO_TEXTO
+                .iter()
+                .map(|l| Line::from(Span::styled(*l, style(pal.fg))))
+                .collect();
+            f.render_widget(Paragraph::new(lines), inner);
         }
         Some(Overlay::Themes { selected }) => {
             let inner = block.inner(rect);

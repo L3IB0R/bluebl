@@ -14,6 +14,8 @@ Opciones:
   -t, --theme NOMBRE   arrancar con un tema (queda guardado en la config)
       --themes         listar los temas disponibles
       --deps           comprobar la radio BLE y cómo instalarla
+      --nodo           modo nodo: reenviar paquetes en segundo plano
+      --nodo --off     detener el modo nodo
   -c, --config         mostrar la ruta del archivo de configuración
   -h, --help           esta ayuda
   -V, --version        versión de BlueBl
@@ -22,9 +24,9 @@ Dentro del programa:
   intro enviar · tab cambiar panel · ↑↓ / avpag rePag desplazar
   F1 o ctrl+H ayuda · ctrl+T selector de temas · ctrl+Q salir
   ctrl+W quién está · ctrl+F tu huella · ctrl+L limpiar el chat
-  ctrl+P QR de emparejamiento · ctrl+N tu apodo
+  ctrl+P QR de emparejamiento · ctrl+N tu apodo · F6 modo nodo
 
-Comandos: /help · /nick · /who · /pair · /fp · /accept · /theme
+Comandos: /help · /nick · /who · /pair · /fp · /accept · /theme · /nodo
 
 Configuración: ~/.config/bluebl/config";
 
@@ -32,12 +34,22 @@ Configuración: ~/.config/bluebl/config";
 enum Cli {
     /// Seguir y arrancar la interfaz.
     Run,
+    /// Arrancar el modo nodo en segundo plano.
+    Nodo,
+    /// Detener el modo nodo.
+    NodoOff,
+    /// Proceso interno del modo nodo (lo arranca `--nodo`).
+    NodoFg,
     /// Terminar con este código de salida.
     Exit(i32),
 }
 
 fn parse_args(cfg: &mut Config) -> Cli {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // --nodo puede venir con --off en cualquier orden.
+    let nodo = args.iter().any(|a| a == "--nodo");
+    let nodo_off = args.iter().any(|a| a == "--off");
+    let nodo_fg = args.iter().any(|a| a == "--nodo-fg");
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -45,6 +57,9 @@ fn parse_args(cfg: &mut Config) -> Cli {
                 println!("{HELP}");
                 return Cli::Exit(0);
             }
+            // Modo nodo: proceso interno o banderas ya detectadas.
+            "--nodo-fg" => {}
+            "--nodo" | "--off" => {}
             "-V" | "--version" => {
                 println!("bluebl {}", env!("CARGO_PKG_VERSION"));
                 return Cli::Exit(0);
@@ -96,13 +111,31 @@ fn parse_args(cfg: &mut Config) -> Cli {
         }
         i += 1;
     }
+    // Banderas del modo nodo, detectadas antes del bucle.
+    if nodo_fg {
+        return Cli::NodoFg;
+    }
+    if nodo && nodo_off {
+        return Cli::NodoOff;
+    }
+    if nodo {
+        return Cli::Nodo;
+    }
+    if nodo_off {
+        eprintln!("--off sólo tiene sentido con --nodo: bluebl --nodo --off");
+        return Cli::Exit(2);
+    }
     Cli::Run
 }
 
 fn main() -> std::io::Result<()> {
     let mut cfg = Config::load();
-    if let Cli::Exit(code) = parse_args(&mut cfg) {
-        std::process::exit(code);
+    match parse_args(&mut cfg) {
+        Cli::Exit(code) => std::process::exit(code),
+        Cli::Nodo => std::process::exit(bluebl::nodo::arrancar()),
+        Cli::NodoOff => std::process::exit(bluebl::nodo::detener()),
+        Cli::NodoFg => std::process::exit(bluebl::nodo::correr()),
+        Cli::Run => {}
     }
 
     // Canal de eventos: el backend BLE (u otro) le cuenta a la TUI lo que

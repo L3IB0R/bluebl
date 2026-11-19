@@ -27,6 +27,8 @@ pub enum Command {
     Accept(String),
     /// `/fp [apodo]` — huella digital (para comparar con el teléfono).
     Fp(Option<String>),
+    /// `/nodo` — activar/desactivar el modo nodo (repetidor de la malla).
+    Nodo,
     /// Comando no reconocido (se reporta, no se envía como mensaje).
     Unknown(String),
 }
@@ -64,6 +66,7 @@ pub fn parse(input: &str) -> Option<Command> {
         } else {
             Some(args.to_string())
         }),
+        "nodo" | "node" | "repetidor" | "relay" => Command::Nodo,
         // Comando desconocido: se reporta, no se envía como mensaje.
         other => Command::Unknown(other.to_string()),
     })
@@ -89,6 +92,7 @@ pub fn help_text() -> Vec<String> {
         "  /pair             QR de emparejamiento (bitchat://verify) + huella".into(),
         "  /fp [apodo]       huella digital para comparar con el teléfono".into(),
         "  /accept APODO     añadir contacto tras comparar huellas (★)".into(),
+        "  /nodo             modo nodo: reenvía paquetes entre vecinos".into(),
         "  /help             esta ayuda".into(),
         "  /quit             salir".into(),
         String::new(),
@@ -96,7 +100,7 @@ pub fn help_text() -> Vec<String> {
         "  intro enviar · tab panel · ↑↓ / avpag rePag desplazar".into(),
         "  F1 o ctrl+H ayuda      ctrl+T temas       ctrl+Q salir".into(),
         "  ctrl+W quién está      ctrl+F tu huella    ctrl+L limpiar".into(),
-        "  ctrl+P QR de emparejar ctrl+N tu apodo".into(),
+        "  ctrl+P QR de emparejar ctrl+N tu apodo     F6 modo nodo".into(),
     ]
 }
 
@@ -150,5 +154,14 @@ mod tests {
     fn case_insensitive() {
         assert_eq!(parse("/HELP"), Some(Command::Help));
         assert_eq!(parse("/Nick Luna"), Some(Command::Nick("Luna".into())));
+    }
+
+    #[test]
+    fn comando_nodo() {
+        assert_eq!(parse("/nodo"), Some(Command::Nodo));
+        assert_eq!(parse("/NODO"), Some(Command::Nodo));
+        assert_eq!(parse("/node"), Some(Command::Nodo));
+        assert_eq!(parse("/repetidor"), Some(Command::Nodo));
+        assert_eq!(parse("/relay"), Some(Command::Nodo));
     }
 }

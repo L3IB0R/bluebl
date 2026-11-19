@@ -101,6 +101,8 @@ pub enum Overlay {
         code: String,
         qr: Vec<String>,
     },
+    /// Confirmación para entrar en modo nodo (repetidor).
+    Nodo,
 }
 
 /// Contacto verificado por emparejamiento: no es un random de la malla.
@@ -236,6 +238,9 @@ pub struct App {
     pub net: Option<crate::net::NetTx>,
     /// Último ancho alto para decidir el layout (lo escribe ui).
     pub last_width: u16,
+    /// Modo nodo (repetidor): reenvía paquetes entre vecinos y la
+    /// interfaz se queda en vista mínima, sin caja de escritura.
+    pub node_mode: bool,
 }
 
 impl App {
@@ -277,6 +282,7 @@ impl App {
             rx,
             net: None,
             last_width: 0,
+            node_mode: false,
         }
     }
 
@@ -532,6 +538,11 @@ impl App {
                     KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => {}
                     _ => self.overlay = Some(Overlay::Pair { code, qr }),
                 },
+                Overlay::Nodo => match key.code {
+                    KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('q') => {}
+                    KeyCode::Enter | KeyCode::Char('s') => self.enter_node(),
+                    _ => self.overlay = Some(Overlay::Nodo),
+                },
                 Overlay::Themes { mut selected } => match key.code {
                     KeyCode::Esc | KeyCode::Char('q') => {}
                     KeyCode::Up => {
@@ -574,8 +585,31 @@ impl App {
             return;
         }
 
+        // Modo nodo: vista mínima. Se lee y se sale (F6); escribir no
+        // tiene dónde ir porque no hay caja de entrada.
+        if self.node_mode {
+            match key.code {
+                KeyCode::F(1) => self.overlay = Some(Overlay::Help),
+                KeyCode::F(6) => self.exit_node(),
+                KeyCode::Up => self.scroll_up(3),
+                KeyCode::Down => self.scroll_down(3),
+                KeyCode::PageUp => self.scroll_up(20),
+                KeyCode::PageDown => self.scroll_down(20),
+                KeyCode::Home if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.scroll_up(usize::MAX / 2)
+                }
+                KeyCode::End if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.scroll_bottom()
+                }
+                _ => {}
+            }
+            return;
+        }
+
         match key.code {
             KeyCode::F(1) => self.overlay = Some(Overlay::Help),
+            // F6 entra en modo nodo (con confirmación) o sale de él.
+            KeyCode::F(6) => self.toggle_node(),
             KeyCode::Tab => self.panel = self.panel.next(),
             KeyCode::Enter => self.send(),
             KeyCode::Esc => self.input.clear(),
@@ -841,10 +875,48 @@ impl App {
             Command::Fp(nick) => {
                 self.print_fingerprint(nick.as_deref());
             }
+            Command::Nodo => self.toggle_node(),
             Command::Unknown(name) => {
                 self.error(format!("comando desconocido: /{name} — prueba /help"));
             }
         }
+    }
+
+    /// Pide confirmación para entrar en modo nodo (o sale directo si ya
+    /// está activo). La confirmación explica lo que hace y lo que no.
+    fn toggle_node(&mut self) {
+        if self.node_mode {
+            self.exit_node();
+        } else {
+            self.overlay = Some(Overlay::Nodo);
+        }
+    }
+
+    /// Activa el modo nodo: la radio sigue reenviando paquetes (flood con
+    /// TTL y dedup) y la interfaz se queda en vista mínima.
+    fn enter_node(&mut self) {
+        if self.node_mode {
+            return;
+        }
+        self.node_mode = true;
+        self.overlay = None;
+        self.input.clear();
+        self.system("modo nodo ACTIVADO: este equipo reenvía los paquetes");
+        self.system("que pasan por él, así la malla llega más lejos.");
+        self.system("sólo se reenvía el chat público en difusión: no hay");
+        self.system("mensajes dirigidos ni privados que reenviar.");
+        self.system("pulsa F6 para salir del modo nodo.");
+        self.status = "modo nodo: reenviando".into();
+    }
+
+    /// Vuelve al modo chat normal.
+    fn exit_node(&mut self) {
+        if !self.node_mode {
+            return;
+        }
+        self.node_mode = false;
+        self.system("modo nodo desactivado — vuelves al chat.");
+        self.status = "anunciando en la malla".into();
     }
 }
 
@@ -1434,5 +1506,82 @@ mod tests {
         assert_eq!(app.scroll, 1);
         app.scroll_down(100);
         assert_eq!(app.scroll, 0);
+    }
+
+    #[test]
+    fn f6_pide_confirmacion_antes_de_activar_el_nodo() {
+        let (mut app, _tx) = test_app();
+        app.on_key(KeyEvent::new(KeyCode::F(6), KeyModifiers::NONE));
+        assert!(matches!(app.overlay, Some(Overlay::Nodo)));
+        assert!(!app.node_mode, "sin confirmar no se activa");
+    }
+
+    #[test]
+    fn intro_activa_el_nodo_y_esc_lo_deja_como_estaba() {
+        let (mut app, _tx) = test_app();
+        app.on_key(KeyEvent::new(KeyCode::F(6), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(app.node_mode);
+        assert!(app.overlay.is_none());
+
+        // F6 de nuevo: sale directo, sin confirmación.
+        app.on_key(KeyEvent::new(KeyCode::F(6), KeyModifiers::NONE));
+        assert!(!app.node_mode);
+    }
+
+    #[test]
+    fn esc_en_la_confirmacion_no_activa_nada() {
+        let (mut app, _tx) = test_app();
+        app.on_key(KeyEvent::new(KeyCode::F(6), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(!app.node_mode);
+        assert!(app.overlay.is_none());
+    }
+
+    #[test]
+    fn comando_nodo_por_barra() {
+        let (mut app, _tx) = test_app();
+        for c in "/nodo".chars() {
+            app.input.insert(c);
+        }
+        app.send();
+        assert!(matches!(app.overlay, Some(Overlay::Nodo)));
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(app.node_mode);
+    }
+
+    #[test]
+    fn en_el_nodo_no_se_escribe_nada() {
+        let (mut app, _tx) = test_app();
+        app.on_key(KeyEvent::new(KeyCode::F(6), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let antes = app.lines().len();
+        // Ni letras ni intro escriben: no hay caja de escritura.
+        app.on_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(app.input.as_str().is_empty());
+        // No se coló ningún mensaje nuevo en el chat.
+        assert_eq!(app.lines().len(), antes);
+        // Y se puede salir con F6.
+        app.on_key(KeyEvent::new(KeyCode::F(6), KeyModifiers::NONE));
+        assert!(!app.node_mode);
+    }
+
+    #[test]
+    fn el_nodo_explica_lo_que_hace_y_lo_que_no() {
+        let (mut app, _tx) = test_app();
+        app.on_key(KeyEvent::new(KeyCode::F(6), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let texto: String = app.lines().iter().map(|l| l.text.clone()).collect();
+        assert!(texto.contains("reenvía"), "dice que reenvía: {texto}");
+        assert!(
+            texto.contains("público") || texto.contains("difusión"),
+            "aclara que es el chat público: {texto}"
+        );
+        assert!(
+            texto.contains("dirigidos") || texto.contains("privados"),
+            "dice que no reenvía privados: {texto}"
+        );
     }
 }

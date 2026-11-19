@@ -148,6 +148,8 @@ bluebl                    # arranca con la configuración guardada
 bluebl -t dracula         # arranca con un tema y lo guarda
 bluebl --themes           # lista los 42 temas por categoría
 bluebl --deps             # estado de la radio y cómo instalarla
+bluebl --nodo             # modo nodo en segundo plano (sin interfaz)
+bluebl --nodo --off       # detener el modo nodo
 ```
 
 Dentro del programa:
@@ -164,6 +166,7 @@ Dentro del programa:
 | `ctrl+N` | tu apodo (`/nick`) |
 | `ctrl+L` | limpiar el chat (`/clear`) |
 | `ctrl+T` | selector de temas |
+| `f6` | modo nodo (repetidor) — con confirmación |
 | `ctrl+Q` | salir (apaga la radio y guarda la config) |
 
 Comandos de chat:
@@ -174,8 +177,25 @@ Comandos de chat:
 /theme NOMBRE    cambiar tema           /density N      compacto | comodo | grande
 /pair            QR + huella            /fp [apodo]     huella para comparar
 /accept APODO    contacto verificado    /deps           radio del sistema
-/clear           vaciar el chat         /help           esta ayuda
+/clear           vaciar el chat         /nodo           modo nodo (repetidor)
+/help            esta ayuda
 ```
+
+## Modo nodo (repetidor)
+
+El modo nodo deja un equipo funcionando como repetidor de la malla: no
+escribe, sólo reenvía los paquetes que recibe hacia sus vecinos, con lo
+que la red llega más lejos. Tres formas de activarlo:
+
+- **`f6`** dentro del programa (pide confirmación; `f6` otra vez sale).
+- **`/nodo`** — lo mismo, desde la barra de comandos.
+- **`bluebl --nodo`** — en segundo plano, sin interfaz. El log queda en
+  `~/.config/bluebl/nodo.log` y se detiene con `bluebl --nodo --off`.
+
+Con honestidad: el modo nodo sólo reenvía el **chat público en
+difusión** que ya circula por la malla. No hay mensajes dirigidos ni
+privados entre teléfonos que BlueBl pueda descifrar ni reenviar; la
+malla de BlueBl es sala pública de barrio, no correspondencia.
 
 ## Configuración
 
