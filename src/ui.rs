@@ -277,8 +277,27 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
     let pal = &app.theme().palette;
     let id = app.peer_id_hex();
     let left = format!(" ⌬ {} · {} pares ", &id[..8], app.peers.len());
-    let right = format!(" {} ", app.status);
-    let line = Line::from(vec![
+    let channel = format!(" {}", app.channel());
+    let status = format!(" {} ", app.status);
+
+    // Pistas de atajos a la derecha, en tono discreto. Escalera: se pinta
+    // la más completa que quepa entera en el ancho que sobra.
+    const PISTAS: [&str; 5] = [
+        "F1 ayuda · ^W quién · ^P QR · ^T temas · ^Q salir",
+        "F1 ayuda · ^W quién · ^P QR · ^Q salir",
+        "F1 ayuda · ^W quién · ^Q salir",
+        "F1 ayuda · ^Q salir",
+        "F1 ayuda",
+    ];
+
+    let width = area.width as usize;
+    let fijo = left.chars().count() + channel.chars().count() + status.chars().count();
+    let pista = PISTAS
+        .iter()
+        .find(|p| fijo + p.chars().count() <= width)
+        .copied();
+
+    let mut spans = vec![
         Span::styled(
             left,
             Style::default()
@@ -286,14 +305,21 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
                 .bg(pal.accent)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(
-            format!(" {}", app.channel()),
+        Span::styled(channel, Style::default().fg(pal.dim).bg(pal.status_bg)),
+        Span::styled(status, Style::default().fg(pal.accent2).bg(pal.status_bg)),
+    ];
+    if let Some(pista) = pista {
+        // Hueco hasta la derecha (si es cero, la pista queda pegada al
+        // estado: también se lee bien).
+        let hueco = width - fijo - pista.chars().count();
+        spans.push(Span::raw(" ".repeat(hueco)));
+        spans.push(Span::styled(
+            pista,
             Style::default().fg(pal.dim).bg(pal.status_bg),
-        ),
-        Span::styled(right, Style::default().fg(pal.accent2).bg(pal.status_bg)),
-    ]);
+        ));
+    }
     f.render_widget(
-        Paragraph::new(line).style(Style::default().bg(pal.status_bg)),
+        Paragraph::new(Line::from(spans)).style(Style::default().bg(pal.status_bg)),
         area,
     );
 }
